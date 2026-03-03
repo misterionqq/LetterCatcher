@@ -3,14 +3,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 'personal' (1 bot = 1 user) | 'centralized' (1 bot = many users)
 APP_MODE = os.getenv("APP_MODE", "personal")
+ADMIN_TG_ID = int(os.getenv("ADMIN_TG_ID", 0))
 
-IMAP_SERVER = os.getenv("IMAP_SERVER", "imap.yandex.ru")
+IMAP_SERVER = os.getenv("IMAP_SERVER", "imap.gmail.com")
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///app.db")
 
+# Новые переменные
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
 if not EMAIL_USER or not EMAIL_PASSWORD:
     raise ValueError("Missing EMAIL_USER or EMAIL_PASSWORD in .env")
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError("Missing TELEGRAM_BOT_TOKEN in .env")
