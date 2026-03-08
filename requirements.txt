@@ -5,4 +5,3 @@ greenlet>=3.0.3
 aiogram>=3.4.0
 beautifulsoup4>=4.12.3
 aiohttp>=3.9.3
-
