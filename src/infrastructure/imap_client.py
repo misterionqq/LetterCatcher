@@ -1,10 +1,15 @@
+import asyncio
 import imaplib
 import email
+import re
 from email.header import decode_header
+from email.utils import parsedate_to_datetime
 from typing import List
-from datetime import datetime
+from bs4 import BeautifulSoup
+
 from src.core.interfaces import IEmailRepository
 from src.core.entities import EmailMessage
+from src.infrastructure.config import APP_MODE, EMAIL_USER
 
 class ImapEmailRepository(IEmailRepository):
     def __init__(self, imap_server: str, email_user: str, email_password: str):
@@ -12,33 +17,42 @@ class ImapEmailRepository(IEmailRepository):
         self.user = email_user
         self.password = email_password
         self.connection = None
+    
+    async def connect(self):
+        await asyncio.to_thread(self._connect_sync)
 
-    def connect(self):
+    async def disconnect(self):
+        await asyncio.to_thread(self._disconnect_sync)
+
+    async def get_unread_emails(self, limit: int = 5) -> List[EmailMessage]:
+        return await asyncio.to_thread(self._get_unread_sync, limit)
+
+    def _connect_sync(self):
         try:
             self.connection = imaplib.IMAP4_SSL(self.imap_server)
             self.connection.login(self.user, self.password)
-            print(f"Успешное подключение к {self.imap_server}")
         except Exception as e:
-            print(f"Ошибка подключения к IMAP: {e}")
-            raise
+            raise ConnectionError(f"Ошибка подключения к IMAP: {e}")
 
-    def disconnect(self):
+    def _disconnect_sync(self):
         if self.connection:
             try:
                 self.connection.close()
             except:
                 pass
-            self.connection.logout()
+            try:
+                self.connection.logout()
+            except:
+                pass
 
-    def get_unread_emails(self, limit: int = 5) -> List[EmailMessage]:
+    def _get_unread_sync(self, limit: int) -> List[EmailMessage]:
         if not self.connection:
-            raise ConnectionError("Нет подключения к IMAP серверу")
+            self._connect_sync()
 
         self.connection.select("INBOX")
-
         status, messages = self.connection.search(None, "UNSEEN")
         
-        if status != "OK":
+        if status != "OK" or not messages[0]:
             return []
 
         email_ids = messages[0].split()
@@ -53,43 +67,93 @@ class ImapEmailRepository(IEmailRepository):
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
                     
-                    subject, encoding = decode_header(msg["Subject"])[0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode(encoding if encoding else "utf-8")
+                    subject = self._decode_header_part(msg.get("Subject", "(Без темы)"))
                     
-                    sender = msg.get("From")
+                    sender = self._decode_header_part(msg.get("From", "Неизвестно"))
                     
                     date_str = msg.get("Date")
-                    
-                    date_obj = datetime.now() # TODO: парсер времени (?) 
+                    try:
+                        date_obj = parsedate_to_datetime(date_str) if date_str else datetime.now()
+                    except:
+                        date_obj = datetime.now()
 
-                    body = self._get_email_body(msg)
+                    body = self._extract_clean_body(msg)
+
+                    recipient = self._determine_recipient(msg, body)
 
                     email_entity = EmailMessage(
                         uid=e_id.decode(),
                         sender=sender,
                         subject=subject,
                         body=body,
-                        date=date_obj
+                        date=date_obj,
+                        recipient_email=recipient
                     )
                     result_messages.append(email_entity)
         
         return result_messages
 
-    def _get_email_body(self, msg) -> str:
+    def _decode_header_part(self, header_raw: str) -> str:
+        decoded_parts = decode_header(header_raw)
+        result = ""
+        for part, encoding in decoded_parts:
+            if isinstance(part, bytes):
+                result += part.decode(encoding if encoding else "utf-8", errors="ignore")
+            else:
+                result += part
+        return result
+
+    def _extract_clean_body(self, msg) -> str:
+        body_text = ""
+        body_html = ""
+
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
-                content_disposition = str(part.get("Content-Disposition"))
+                disp = str(part.get("Content-Disposition"))
 
-                if content_type == "text/plain" and "attachment" not in content_disposition:
+                if "attachment" in disp:
+                    continue
+
+                if content_type == "text/plain":
                     try:
-                        return part.get_payload(decode=True).decode()
+                        body_text += part.get_payload(decode=True).decode(errors="ignore")
+                    except:
+                        pass
+                elif content_type == "text/html":
+                    try:
+                        body_html += part.get_payload(decode=True).decode(errors="ignore")
                     except:
                         pass
         else:
+            content_type = msg.get_content_type()
             try:
-                return msg.get_payload(decode=True).decode()
+                payload = msg.get_payload(decode=True).decode(errors="ignore")
+                if content_type == "text/html":
+                    body_html = payload
+                else:
+                    body_text = payload
             except:
                 pass
-        return "(Текст не найден или зашифрован)"
+
+        if body_text.strip():
+            return body_text.strip()
+        elif body_html.strip():
+            soup = BeautifulSoup(body_html, "html.parser")
+            return soup.get_text(separator="\n", strip=True)
+        
+        return "(Пустое письмо или нечитаемый формат)"
+
+    def _determine_recipient(self, msg, body: str) -> str:
+        if APP_MODE == "personal":
+            return self.user
+
+        forwarded_to = msg.get("X-Forwarded-To") or msg.get("Delivered-To")
+        if forwarded_to:
+            return self._decode_header_part(forwarded_to)
+        
+        match = re.search(r"To:\s*([\w\.-]+@[\w\.-]+)", body)
+        if match:
+            return match.group(1)
+
+        return self.user 

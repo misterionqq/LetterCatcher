@@ -9,15 +9,16 @@ class EmailMessage:
     subject: str
     body: str
     date: datetime
+    recipient_email: Optional[str] = None 
 
 @dataclass
 class Keyword:
     word: str
-    is_stop_word: bool = False  # False = триггер, True = игнорировать письмо
+    is_stop_word: bool = False
 
 @dataclass
 class User:
     telegram_id: int
-    email: Optional[str] = None 
-    ai_sensitivity: str = "medium"  # low, medium, high
+    email: Optional[str] = None
+    ai_sensitivity: str = "medium"
     keywords: List[Keyword] = field(default_factory=list)
