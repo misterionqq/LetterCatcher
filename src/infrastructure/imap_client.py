@@ -2,6 +2,7 @@ import asyncio
 import imaplib
 import email
 import re
+from datetime import datetime, timedelta
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from typing import List
@@ -50,7 +51,12 @@ class ImapEmailRepository(IEmailRepository):
             self._connect_sync()
 
         self.connection.select("INBOX")
-        status, messages = self.connection.search(None, "UNSEEN")
+        
+
+        date_since = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
+        
+        search_criteria = f'(UNSEEN SINCE "{date_since}")'
+        status, messages = self.connection.search(None, search_criteria)
         
         if status != "OK" or not messages[0]:
             return []
@@ -59,7 +65,6 @@ class ImapEmailRepository(IEmailRepository):
         latest_email_ids = email_ids[-limit:]
 
         result_messages = []
-
         for e_id in reversed(latest_email_ids):
             res, msg_data = self.connection.fetch(e_id, "(RFC822)")
             
