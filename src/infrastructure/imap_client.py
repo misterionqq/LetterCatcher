@@ -162,3 +162,4 @@ class ImapEmailRepository(IEmailRepository):
             return match.group(1)
 
         return self.user 
+    
