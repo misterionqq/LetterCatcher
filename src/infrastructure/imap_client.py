@@ -163,4 +163,3 @@ class ImapEmailRepository(IEmailRepository):
 
         return self.user 
     
-    
