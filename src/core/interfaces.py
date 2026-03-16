@@ -35,3 +35,8 @@ class IUserRepository(ABC):
     @abstractmethod
     async def remove_keyword(self, tg_id: int, word: str) -> None:
         pass
+
+class IAIAnalyzer(ABC):
+    @abstractmethod
+    async def analyze_urgency(self, subject: str, text: str) -> dict:
+        pass
