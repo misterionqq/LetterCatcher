@@ -12,9 +12,9 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///app.db")
 
-# Новые переменные
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL")
 
 if not EMAIL_USER or not EMAIL_PASSWORD:
     raise ValueError("Missing EMAIL_USER or EMAIL_PASSWORD in .env")
