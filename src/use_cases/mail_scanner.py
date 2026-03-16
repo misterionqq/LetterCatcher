@@ -3,14 +3,15 @@ import logging
 from aiogram import Bot
 import html
 
-from src.core.interfaces import IEmailRepository, IUserRepository
+from src.core.interfaces import IEmailRepository, IUserRepository, IAIAnalyzer
 from src.infrastructure.config import APP_MODE, ADMIN_TG_ID
 
 class MailScanner:
-    def __init__(self, email_repo: IEmailRepository, user_repo: IUserRepository, bot: Bot):
+    def __init__(self, email_repo: IEmailRepository, user_repo: IUserRepository, bot: Bot, ai_analyzer: IAIAnalyzer):
         self.email_repo = email_repo
         self.user_repo = user_repo
         self.bot = bot
+        self.ai_analyzer = ai_analyzer
         self.is_running = False
 
     async def start_polling(self, interval_seconds: int = 30):
@@ -54,38 +55,70 @@ class MailScanner:
 
             is_important = False
             triggered_word = None
+            ai_reason = ""
 
             search_text = (email.subject + " " + email.body).lower()
             
-            if not user_profile.keywords:
-                is_important = True 
-            else:
+            # Step 1: Static analysis (RegEx / Keywords)
+            has_trigger = False
+            is_stopped = False
+
+            if user_profile.keywords:
                 for kw in user_profile.keywords:
                     if kw.word in search_text:
                         if kw.is_stop_word:
-                            is_important = False
+                            is_stopped = True
                             break
                         else:
-                            is_important = True
+                            has_trigger = True
                             triggered_word = kw.word
 
+            if is_stopped:
+                logging.info(f"Письмо '{email.subject}' пропущено (сработало стоп-слово).")
+                continue
+
+            # Step 2: LLM
+            sensitivity = user_profile.ai_sensitivity
+
+            if sensitivity == "low":
+                is_important = has_trigger
+                if has_trigger:
+                    logging.info(f"⚡️ Триггер '{triggered_word}' сработал (Режим LOW, без AI). Письмо важное.")
+            
+            elif sensitivity == "medium":
+                if has_trigger:
+                    logging.info(f"⚡️ Триггер '{triggered_word}' сработал (Режим MEDIUM). Передаем в AI...")
+                    ai_result = await self.ai_analyzer.analyze_urgency(email.subject, email.body)
+                    is_important = ai_result["is_important"]
+                    ai_reason = ai_result["reason"]
+                else:
+                    logging.info(f"Письмо '{email.subject}' пропущено (нет триггерных слов).")
+                    is_important = False
+            
+            elif sensitivity == "high":
+                logging.info(f"⚡️ Режим HIGH. Передаем письмо '{email.subject}' в AI без проверки триггеров...")
+                ai_result = await self.ai_analyzer.analyze_urgency(email.subject, email.body)
+                is_important = ai_result["is_important"]
+                ai_reason = ai_result["reason"]
+
             if is_important:
-                # Экранируем спецсимволы (<, >, &), чтобы Telegram не принял их за HTML-теги
                 safe_sender = html.escape(email.sender)
                 safe_subject = html.escape(email.subject)
-                safe_body = html.escape(email.body[:300]) # Взяли 300 символов для превью
+                safe_body = html.escape(email.body[:250])
 
                 msg_text = (
-                    f"🔔 <b>Новое важное письмо!</b>\n\n"
+                    f"🔴 <b>ВАЖНОЕ ПИСЬМО!</b>\n\n"
                     f"<b>От:</b> {safe_sender}\n"
                     f"<b>Тема:</b> {safe_subject}\n\n"
-                    f"<i>{safe_body}...</i>\n"
+                    f"<i>{safe_body}...</i>\n\n"
+                    f"🤖 <b>Вывод AI:</b> {html.escape(ai_reason)}"
                 )
+                
                 if triggered_word:
-                    msg_text += f"\n🎯 Сработало слово: <code>{triggered_word}</code>"
+                    msg_text += f"\n🎯 Триггер: <code>{triggered_word}</code>"
 
                 try:
                     await self.bot.send_message(chat_id=target_tg_id, text=msg_text)
-                    logging.info(f"Уведомление отправлено пользователю {target_tg_id}")
+                    logging.info(f"Уведомление (AI) отправлено пользователю {target_tg_id}")
                 except Exception as e:
                     logging.error(f"Не удалось отправить сообщение в TG: {e}")
