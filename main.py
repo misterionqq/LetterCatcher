@@ -4,13 +4,14 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 
-from src.infrastructure.config import TELEGRAM_BOT_TOKEN, IMAP_SERVER, EMAIL_USER, EMAIL_PASSWORD
+from src.infrastructure.config import TELEGRAM_BOT_TOKEN, IMAP_SERVER, EMAIL_USER, EMAIL_PASSWORD, OPENROUTER_API_KEY, LLM_MODEL
 from src.infrastructure.database.setup import init_db, AsyncSessionLocal
 from src.infrastructure.repositories.user_repository import SQLAlchemyUserRepository
 from src.infrastructure.imap_client import ImapEmailRepository
 from src.use_cases.manage_users import ManageUsersUseCase
 from src.use_cases.mail_scanner import MailScanner
 from src.presentation.telegram.handlers import router
+from src.infrastructure.openrouter_client import OpenRouterAnalyzer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -24,6 +25,8 @@ async def main():
         email_user=EMAIL_USER,
         email_password=EMAIL_PASSWORD
     )
+    
+    ai_analyzer = OpenRouterAnalyzer(api_key=OPENROUTER_API_KEY, model=LLM_MODEL)
 
     user_use_case = ManageUsersUseCase(user_repo=user_repo)
 
@@ -31,7 +34,7 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
 
-    scanner = MailScanner(email_repo=email_repo, user_repo=user_repo, bot=bot)
+    scanner = MailScanner(email_repo=email_repo, user_repo=user_repo, bot=bot, ai_analyzer=ai_analyzer)
 
     scanner_task = asyncio.create_task(scanner.start_polling(interval_seconds=30))
 
