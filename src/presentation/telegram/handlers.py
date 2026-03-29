@@ -16,23 +16,52 @@ async def check_access(message: Message) -> bool:
     return True
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, user_use_case: ManageUsersUseCase):
+async def cmd_start(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
     if not await check_access(message): return
-    
-    # Регистрируем пользователя в БД
-    await user_use_case.register_or_update_user(tg_id=message.from_user.id)
-    
+
+    user = await user_use_case.register_or_update_user(tg_id=message.from_user.id)
+
+    if APP_MODE == "centralized" and not user.email:
+        await message.answer(
+            "👋 Привет! Я — <b>LetterCatcher</b>.\n\n"
+            "Для работы в корпоративном режиме укажите ваш рабочий email:",
+            parse_mode="HTML"
+        )
+        await state.set_state(UserSettingsStates.waiting_for_email)
+        return
+
+    await _send_welcome(message)
+
+async def _send_welcome(message: Message):
+    if APP_MODE == "centralized":
+        commands = (
+            "👤 /profile - Мои настройки и ключевые слова\n"
+            "📧 /email - Изменить привязанную почту\n"
+            "🔕 /dnd - Не беспокоить (вкл/выкл)\n"
+            "➕ /add - Добавить ключевое слово (триггер)\n"
+            "➖ /remove - Удалить слово (например: /remove раздача)"
+        )
+    else:
+        commands = (
+            "👤 /profile - Мои настройки и ключевые слова\n"
+            "🔕 /dnd - Не беспокоить (вкл/выкл)\n"
+            "➕ /add - Добавить ключевое слово (триггер)\n"
+            "➖ /remove - Удалить слово (например: /remove раздача)"
+        )
     welcome_text = (
         "👋 Привет! Я — <b>LetterCatcher</b>.\n\n"
         "Я слежу за вашей почтой и присылаю уведомления только о <b>важных</b> событиях.\n\n"
-        "Доступные команды:\n"
-        "👤 /profile - Мои настройки и ключевые слова\n"
-        "📧 /email - Привязать почту (например: /email user@mail.ru)\n"
-        "🔕 /dnd - Не беспокоить (вкл/выкл)\n"
-        "➕ /add - Добавить ключевое слово (триггер)\n"
-        "➖ /remove - Удалить слово (например: /remove раздача)"
+        f"Доступные команды:\n{commands}"
     )
     await message.answer(welcome_text, parse_mode="HTML")
+
+@router.message(UserSettingsStates.waiting_for_email)
+async def process_email_registration(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
+    email_input = message.text.strip().lower()
+    await user_use_case.set_email(tg_id=message.from_user.id, email=email_input)
+    await message.answer(f"📧 Email <b>{email_input}</b> привязан к вашему профилю.", parse_mode="HTML")
+    await state.clear()
+    await _send_welcome(message)
 
 @router.message(Command("profile"))
 async def cmd_profile(message: Message, user_use_case: ManageUsersUseCase):
