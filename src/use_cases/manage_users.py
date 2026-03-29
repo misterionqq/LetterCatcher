@@ -22,3 +22,17 @@ class ManageUsersUseCase:
 
     async def get_user_profile(self, tg_id: int) -> User:
         return await self.user_repo.get_by_telegram_id(tg_id)
+
+    async def set_email(self, tg_id: int, email: str) -> None:
+        user = await self.user_repo.get_by_telegram_id(tg_id)
+        if user:
+            user.email = email
+            await self.user_repo.save_user(user)
+
+    async def toggle_dnd(self, tg_id: int) -> bool:
+        user = await self.user_repo.get_by_telegram_id(tg_id)
+        if user:
+            new_dnd = not user.is_dnd
+            await self.user_repo.set_dnd(tg_id, new_dnd)
+            return new_dnd
+        return False

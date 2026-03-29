@@ -21,4 +21,5 @@ class User:
     telegram_id: int
     email: Optional[str] = None
     ai_sensitivity: str = "medium"
+    is_dnd: bool = False
     keywords: List[Keyword] = field(default_factory=list)

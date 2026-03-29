@@ -27,6 +27,8 @@ async def cmd_start(message: Message, user_use_case: ManageUsersUseCase):
         "Я слежу за вашей почтой и присылаю уведомления только о <b>важных</b> событиях.\n\n"
         "Доступные команды:\n"
         "👤 /profile - Мои настройки и ключевые слова\n"
+        "📧 /email - Привязать почту (например: /email user@mail.ru)\n"
+        "🔕 /dnd - Не беспокоить (вкл/выкл)\n"
         "➕ /add - Добавить ключевое слово (триггер)\n"
         "➖ /remove - Удалить слово (например: /remove раздача)"
     )
@@ -43,8 +45,10 @@ async def cmd_profile(message: Message, user_use_case: ManageUsersUseCase):
 
     text = f"⚙️ <b>Ваш профиль:</b>\n"
     text += f"ID: <code>{user.telegram_id}</code>\n"
-    text += f"Чувствительность AI: <b>{user.ai_sensitivity}</b>\n\n"
-    
+    text += f"Email: <b>{user.email or 'не привязан'}</b>\n"
+    text += f"Чувствительность AI: <b>{user.ai_sensitivity}</b>\n"
+    text += f"Не беспокоить: <b>{'включен 🔕' if user.is_dnd else 'выключен'}</b>\n\n"
+
     if not user.keywords:
         text += "<i>У вас пока нет ключевых слов для отслеживания. Нажмите /add чтобы добавить.</i>"
     else:
@@ -53,6 +57,29 @@ async def cmd_profile(message: Message, user_use_case: ManageUsersUseCase):
             text += f" • {kw.word}\n"
 
     await message.answer(text, parse_mode="HTML")
+
+@router.message(Command("email"))
+async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
+    if not await check_access(message): return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Укажите email. Пример: <code>/email user@mail.ru</code>", parse_mode="HTML")
+        return
+
+    email = parts[1].strip().lower()
+    await user_use_case.set_email(tg_id=message.from_user.id, email=email)
+    await message.answer(f"📧 Email <b>{email}</b> привязан к вашему профилю.", parse_mode="HTML")
+
+@router.message(Command("dnd"))
+async def cmd_dnd(message: Message, user_use_case: ManageUsersUseCase):
+    if not await check_access(message): return
+
+    new_state = await user_use_case.toggle_dnd(tg_id=message.from_user.id)
+    if new_state:
+        await message.answer("🔕 Режим «Не беспокоить» <b>включен</b>. Уведомления приостановлены.", parse_mode="HTML")
+    else:
+        await message.answer("🔔 Режим «Не беспокоить» <b>выключен</b>. Уведомления возобновлены.", parse_mode="HTML")
 
 @router.message(Command("add"))
 async def cmd_add_keyword(message: Message, state: FSMContext):

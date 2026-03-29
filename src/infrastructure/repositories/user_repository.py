@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from src.core.entities import User, Keyword
 from src.core.interfaces import IUserRepository
-from src.infrastructure.database.models import UserModel, KeywordModel
+from src.infrastructure.database.models import UserModel, KeywordModel, ProcessedEmailModel
 
 class SQLAlchemyUserRepository(IUserRepository):
     def __init__(self, session_factory: async_sessionmaker):
@@ -15,6 +15,7 @@ class SQLAlchemyUserRepository(IUserRepository):
             telegram_id=model.telegram_id,
             email=model.email,
             ai_sensitivity=model.ai_sensitivity,
+            is_dnd=model.is_dnd,
             keywords=keywords
         )
 
@@ -44,7 +45,8 @@ class SQLAlchemyUserRepository(IUserRepository):
             
             model.email = user.email
             model.ai_sensitivity = user.ai_sensitivity
-            
+            model.is_dnd = user.is_dnd
+
             await session.commit()
 
     async def add_keyword(self, tg_id: int, keyword: Keyword) -> None:
@@ -68,3 +70,27 @@ class SQLAlchemyUserRepository(IUserRepository):
             if model:
                 await session.delete(model)
                 await session.commit()
+
+    async def set_dnd(self, tg_id: int, is_dnd: bool) -> None:
+        async with self.session_factory() as session:
+            stmt = select(UserModel).where(UserModel.telegram_id == tg_id)
+            result = await session.execute(stmt)
+            model = result.scalar_one_or_none()
+            if model:
+                model.is_dnd = is_dnd
+                await session.commit()
+
+    async def is_email_processed(self, user_id: int, email_uid: str) -> bool:
+        async with self.session_factory() as session:
+            stmt = select(ProcessedEmailModel).where(
+                ProcessedEmailModel.user_id == user_id,
+                ProcessedEmailModel.email_uid == email_uid
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() is not None
+
+    async def mark_email_processed(self, user_id: int, email_uid: str) -> None:
+        async with self.session_factory() as session:
+            model = ProcessedEmailModel(user_id=user_id, email_uid=email_uid)
+            session.add(model)
+            await session.commit()

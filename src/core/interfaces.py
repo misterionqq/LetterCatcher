@@ -36,6 +36,27 @@ class IUserRepository(ABC):
     async def remove_keyword(self, tg_id: int, word: str) -> None:
         pass
 
+    @abstractmethod
+    async def set_dnd(self, tg_id: int, is_dnd: bool) -> None:
+        pass
+
+    @abstractmethod
+    async def is_email_processed(self, user_id: int, email_uid: str) -> bool:
+        pass
+
+    @abstractmethod
+    async def mark_email_processed(self, user_id: int, email_uid: str) -> None:
+        pass
+
+class ICacheRepository(ABC):
+    @abstractmethod
+    async def get_cached_result(self, text_hash: str) -> Optional[dict]:
+        pass
+
+    @abstractmethod
+    async def save_cached_result(self, text_hash: str, is_important: bool, reason: str) -> None:
+        pass
+
 class IAIAnalyzer(ABC):
     @abstractmethod
     async def analyze_urgency(self, subject: str, text: str) -> dict:

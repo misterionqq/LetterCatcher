@@ -12,6 +12,7 @@ from src.use_cases.manage_users import ManageUsersUseCase
 from src.use_cases.mail_scanner import MailScanner
 from src.presentation.telegram.handlers import router
 from src.infrastructure.openrouter_client import OpenRouterAnalyzer
+from src.infrastructure.repositories.cache_repository import SQLAlchemyCacheRepository
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -34,7 +35,8 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
 
-    scanner = MailScanner(email_repo=email_repo, user_repo=user_repo, bot=bot, ai_analyzer=ai_analyzer)
+    cache_repo = SQLAlchemyCacheRepository(session_factory=AsyncSessionLocal)
+    scanner = MailScanner(email_repo=email_repo, user_repo=user_repo, bot=bot, ai_analyzer=ai_analyzer, cache_repo=cache_repo)
 
     scanner_task = asyncio.create_task(scanner.start_polling(interval_seconds=30))
 
