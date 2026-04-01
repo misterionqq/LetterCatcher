@@ -1,6 +1,8 @@
 import asyncio
 import hashlib
 import logging
+import re
+from typing import Optional
 from aiogram import Bot
 import html
 
@@ -129,13 +131,29 @@ class MailScanner:
                 if triggered_word:
                     msg_text += f"\n🎯 Триггер: <code>{triggered_word}</code>"
 
-                try:
-                    await self.bot.send_message(chat_id=target_tg_id, text=msg_text)
-                    logging.info(f"Уведомление (AI) отправлено пользователю {target_tg_id}")
-                except Exception as e:
-                    logging.error(f"Не удалось отправить сообщение в TG: {e}")
+                action_url = self._extract_action_url(email.body)
+                if action_url:
+                    msg_text += f"\n🔗 <b>Ссылка:</b> <a href=\"{action_url}\">Перейти</a>"
+
+                for attempt in range(2):
+                    try:
+                        await self.bot.send_message(chat_id=target_tg_id, text=msg_text, disable_web_page_preview=True)
+                        logging.info(f"Уведомление отправлено пользователю {target_tg_id}")
+                        break
+                    except Exception as e:
+                        logging.error(f"Не удалось отправить сообщение в TG (попытка {attempt + 1}): {e}")
+                        if attempt == 0:
+                            await asyncio.sleep(5)
 
             await self.user_repo.mark_email_processed(target_tg_id, email.uid)
+
+    def _extract_action_url(self, body: str) -> Optional[str]:
+        _NOISE = ("unsubscribe", "track", "pixel", "open.php", "click.php", "beacon")
+        for match in re.finditer(r'https?://[^\s<>"\'\]]+', body):
+            url = match.group(0).rstrip(".,;)")
+            if len(url) <= 200 and not any(n in url.lower() for n in _NOISE):
+                return url
+        return None
 
     async def _analyze_with_cache(self, subject: str, body: str) -> dict:
         text_hash = hashlib.md5(body.encode()).hexdigest()

@@ -1,7 +1,12 @@
+import asyncio
 import aiohttp
 import json
 import logging
 from src.core.interfaces import IAIAnalyzer
+
+_RETRY_ATTEMPTS = 3
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
+
 
 class OpenRouterAnalyzer(IAIAnalyzer):
     def __init__(self, api_key: str, model: str):
@@ -41,34 +46,41 @@ class OpenRouterAnalyzer(IAIAnalyzer):
 
         logging.info(f"🤖 [OpenRouter] -> Отправляем письмо: '{subject}' (текст: {truncated_text[:50]}...)")
 
-        connector = aiohttp.TCPConnector(ssl=False) # TODO: удалить из прода))
-        async with aiohttp.ClientSession(connector=connector) as session:
-            try:
-                async with session.post(self.url, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        content = data['choices'][0]['message']['content'].strip()
-                        
-                        logging.info(f"🤖 [OpenRouter] <- Ответ: {content}")
-                        
-                        try:
-                            if content.startswith("```json"):
-                                content = content[7:-3].strip()
-                            elif content.startswith("```"):
-                                content = content[3:-3].strip()
-                                
-                            result = json.loads(content)
-                            return {
-                                "is_important": bool(result.get("is_important", False)),
-                                "reason": str(result.get("reason", "Не удалось извлечь причину."))
-                            }
-                        except json.JSONDecodeError:
-                            logging.error(f"❌ [OpenRouter] Ошибка парсинга JSON! Сырой ответ: {content}")
-                            return {"is_important": False, "reason": "Ошибка парсинга ответа AI."}
-                    else:
-                        error_text = await response.text()
-                        logging.error(f"❌ [OpenRouter] Ошибка API: {response.status} - {error_text}")
-                        return {"is_important": False, "reason": "Ошибка сервера AI."}
-            except Exception as e:
-                logging.error(f"❌ [OpenRouter] Сетевая ошибка: {e}")
-                return {"is_important": False, "reason": "Сетевая ошибка."}
+        last_error = None
+        async with aiohttp.ClientSession(timeout=_REQUEST_TIMEOUT) as session:
+            for attempt in range(_RETRY_ATTEMPTS):
+                try:
+                    async with session.post(self.url, headers=headers, json=payload) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            content = data['choices'][0]['message']['content'].strip()
+
+                            logging.info(f"🤖 [OpenRouter] <- Ответ: {content}")
+
+                            try:
+                                if content.startswith("```json"):
+                                    content = content[7:-3].strip()
+                                elif content.startswith("```"):
+                                    content = content[3:-3].strip()
+
+                                result = json.loads(content)
+                                return {
+                                    "is_important": bool(result.get("is_important", False)),
+                                    "reason": str(result.get("reason", "Не удалось извлечь причину."))
+                                }
+                            except json.JSONDecodeError:
+                                logging.error(f"❌ [OpenRouter] Ошибка парсинга JSON! Сырой ответ: {content}")
+                                return {"is_important": False, "reason": "Ошибка парсинга ответа AI."}
+                        else:
+                            error_text = await response.text()
+                            logging.error(f"❌ [OpenRouter] Ошибка API (попытка {attempt + 1}): {response.status} - {error_text}")
+                            last_error = f"HTTP {response.status}"
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    logging.warning(f"⚠️ [OpenRouter] Сетевая ошибка (попытка {attempt + 1}): {e}")
+                    last_error = str(e)
+
+                if attempt < _RETRY_ATTEMPTS - 1:
+                    await asyncio.sleep(2 ** attempt)
+
+        logging.error(f"❌ [OpenRouter] Все {_RETRY_ATTEMPTS} попытки исчерпаны. Последняя ошибка: {last_error}")
+        return {"is_important": False, "reason": "Сервис AI недоступен."}

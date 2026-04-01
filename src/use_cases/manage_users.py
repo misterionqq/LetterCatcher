@@ -29,6 +29,12 @@ class ManageUsersUseCase:
             user.email = email
             await self.user_repo.save_user(user)
 
+    async def set_sensitivity(self, tg_id: int, level: str) -> None:
+        user = await self.user_repo.get_by_telegram_id(tg_id)
+        if user:
+            user.ai_sensitivity = level
+            await self.user_repo.save_user(user)
+
     async def toggle_dnd(self, tg_id: int) -> bool:
         user = await self.user_repo.get_by_telegram_id(tg_id)
         if user:
