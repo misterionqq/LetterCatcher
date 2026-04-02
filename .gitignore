@@ -225,6 +225,7 @@ dump.txt
 dumper.py
 
 app.db
+logs/
 summary.md
 
 CLAUDE.md

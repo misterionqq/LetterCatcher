@@ -1,9 +1,12 @@
+import asyncio
+
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from src.use_cases.manage_users import ManageUsersUseCase
+from src.use_cases.mail_scanner import _format_notification
 from src.presentation.telegram.states import UserSettingsStates
 from src.infrastructure.config import APP_MODE, ADMIN_TG_ID, EMAIL_USER
 
@@ -42,15 +45,19 @@ async def cmd_start(message: Message, state: FSMContext, user_use_case: ManageUs
 
 
 async def _send_welcome(message: Message):
+    common_commands = (
+        "👤 /profile — Мои настройки и ключевые слова\n"
+        "⚙️ /sensitivity — Настройка чувствительности\n"
+        "🔕 /dnd — Не беспокоить (вкл/выкл)\n"
+        "➕ /add — Добавить ключевое слово (триггер)\n"
+        "🚫 /stop — Добавить стоп-слово\n"
+        "➖ /remove — Удалить слово (например: /remove раздача)\n"
+        "📜 /history — Последние обработанные письма\n"
+        "📊 /stats — Статистика"
+    )
+
     if APP_MODE == "centralized":
-        commands = (
-            "👤 /profile — Мои настройки и ключевые слова\n"
-            "📧 /email — Изменить привязанную почту\n"
-            "⚙️ /sensitivity — Настройка чувствительности\n"
-            "🔕 /dnd — Не беспокоить (вкл/выкл)\n"
-            "➕ /add — Добавить ключевое слово (триггер)\n"
-            "➖ /remove — Удалить слово (например: /remove раздача)"
-        )
+        commands = f"📧 /email — Изменить привязанную почту\n{common_commands}"
         forwarding_hint = (
             "\n\n📬 <b>Настройте автопересылку писем:</b>\n"
             f"Перенаправьте входящие письма с корпоративной почты на:\n"
@@ -58,13 +65,7 @@ async def _send_welcome(message: Message):
             "<i>Настройки почты → Фильтры и пересылка → Переслать копии на адрес</i>"
         )
     else:
-        commands = (
-            "👤 /profile — Мои настройки и ключевые слова\n"
-            "⚙️ /sensitivity — Настройка чувствительности\n"
-            "🔕 /dnd — Не беспокоить (вкл/выкл)\n"
-            "➕ /add — Добавить ключевое слово (триггер)\n"
-            "➖ /remove — Удалить слово (например: /remove раздача)"
-        )
+        commands = common_commands
         forwarding_hint = ""
 
     welcome_text = (
@@ -79,7 +80,11 @@ async def _send_welcome(message: Message):
 @router.message(UserSettingsStates.waiting_for_email)
 async def process_email_registration(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
     email_input = message.text.strip().lower()
-    await user_use_case.set_email(tg_id=message.from_user.id, email=email_input)
+    try:
+        await user_use_case.set_email(tg_id=message.from_user.id, email=email_input)
+    except ValueError:
+        await message.answer("❌ Неверный формат email. Попробуйте ещё раз:", parse_mode="HTML")
+        return
     await message.answer(f"📧 Email <b>{email_input}</b> привязан к вашему профилю.", parse_mode="HTML")
     await state.clear()
     await _send_welcome(message)
@@ -103,12 +108,20 @@ async def cmd_profile(message: Message, user_use_case: ManageUsersUseCase):
     text += f"Чувствительность AI: <b>{sensitivity_label}</b>\n"
     text += f"Не беспокоить: <b>{'включен 🔕' if user.is_dnd else 'выключен'}</b>\n\n"
 
-    if not user.keywords:
-        text += "<i>У вас пока нет ключевых слов для отслеживания. Нажмите /add чтобы добавить.</i>"
+    triggers = [kw for kw in user.keywords if not kw.is_stop_word]
+    stop_words = [kw for kw in user.keywords if kw.is_stop_word]
+
+    if not triggers and not stop_words:
+        text += "<i>У вас пока нет ключевых слов. Нажмите /add или /stop чтобы добавить.</i>"
     else:
-        text += "🎯 <b>Ключевые слова:</b>\n"
-        for kw in user.keywords:
-            text += f" • {kw.word}\n"
+        if triggers:
+            text += "🎯 <b>Триггерные слова:</b>\n"
+            for kw in triggers:
+                text += f" • {kw.word}\n"
+        if stop_words:
+            text += "🚫 <b>Стоп-слова:</b>\n"
+            for kw in stop_words:
+                text += f" • {kw.word}\n"
 
     await message.answer(text, parse_mode="HTML")
 
@@ -166,7 +179,11 @@ async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
         return
 
     email = parts[1].strip().lower()
-    await user_use_case.set_email(tg_id=message.from_user.id, email=email)
+    try:
+        await user_use_case.set_email(tg_id=message.from_user.id, email=email)
+    except ValueError:
+        await message.answer("❌ Неверный формат email. Пример: <code>/email user@mail.ru</code>", parse_mode="HTML")
+        return
     await message.answer(f"📧 Email <b>{email}</b> привязан к вашему профилю.", parse_mode="HTML")
 
 
@@ -174,11 +191,27 @@ async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
 async def cmd_dnd(message: Message, user_use_case: ManageUsersUseCase):
     if not await check_access(message): return
 
-    new_state = await user_use_case.toggle_dnd(tg_id=message.from_user.id)
+    new_state, pending = await user_use_case.toggle_dnd(tg_id=message.from_user.id)
     if new_state:
         await message.answer("🔕 Режим «Не беспокоить» <b>включен</b>. Уведомления приостановлены.", parse_mode="HTML")
     else:
-        await message.answer("🔔 Режим «Не беспокоить» <b>выключен</b>. Уведомления возобновлены.", parse_mode="HTML")
+        if pending:
+            await message.answer(
+                f"🔔 Режим «Не беспокоить» <b>выключен</b>.\n"
+                f"📩 Отправляю {len(pending)} отложенных уведомлений...",
+                parse_mode="HTML"
+            )
+            for notif in pending:
+                msg = _format_notification(
+                    sender=notif.sender, subject=notif.subject,
+                    body_snippet=notif.body_snippet, ai_reason=notif.ai_reason,
+                    triggered_word=notif.triggered_word, action_url=notif.action_url,
+                    pending=True,
+                )
+                await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
+                await asyncio.sleep(0.3)
+        else:
+            await message.answer("🔔 Режим «Не беспокоить» <b>выключен</b>. Уведомления возобновлены.", parse_mode="HTML")
 
 
 @router.message(Command("add"))
@@ -196,10 +229,38 @@ async def cmd_add_keyword(message: Message, state: FSMContext):
 async def process_keyword(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
     word = message.text.strip().lower()
 
-    await user_use_case.add_trigger_word(tg_id=message.from_user.id, word=word)
-    await message.answer(f"✅ Слово <b>'{word}'</b> успешно добавлено в ваш список!", parse_mode="HTML")
+    try:
+        await user_use_case.add_trigger_word(tg_id=message.from_user.id, word=word)
+    except ValueError:
+        await message.answer(f"⚠️ Слово <b>'{word}'</b> уже есть в вашем списке.", parse_mode="HTML")
+        await state.clear()
+        return
 
+    await message.answer(f"✅ Слово <b>'{word}'</b> успешно добавлено в ваш список!", parse_mode="HTML")
     await state.clear()
+
+
+@router.message(Command("stop"))
+async def cmd_stop_word(message: Message, user_use_case: ManageUsersUseCase):
+    if not await check_access(message): return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer(
+            "Укажите стоп-слово. Пример: <code>/stop реклама</code>\n"
+            "Письма с этим словом будут игнорироваться.",
+            parse_mode="HTML"
+        )
+        return
+
+    word = parts[1].strip().lower()
+    try:
+        await user_use_case.add_stop_word(tg_id=message.from_user.id, word=word)
+    except ValueError:
+        await message.answer(f"⚠️ Стоп-слово <b>'{word}'</b> уже есть в списке.", parse_mode="HTML")
+        return
+
+    await message.answer(f"🚫 Стоп-слово <b>'{word}'</b> добавлено. Письма с ним будут игнорироваться.", parse_mode="HTML")
 
 
 @router.message(Command("remove"))
@@ -218,3 +279,39 @@ async def cmd_remove_keyword(message: Message, user_use_case: ManageUsersUseCase
 
     await user_use_case.user_repo.remove_keyword(tg_id=message.from_user.id, word=word_to_remove)
     await message.answer(f"🗑 Слово <b>'{word_to_remove}'</b> удалено (если оно было в списке).", parse_mode="HTML")
+
+
+@router.message(Command("history"))
+async def cmd_history(message: Message, user_use_case: ManageUsersUseCase):
+    if not await check_access(message): return
+
+    history = await user_use_case.get_email_history(tg_id=message.from_user.id, limit=10)
+    if not history:
+        await message.answer("📜 История пуста — пока не обработано ни одного письма.")
+        return
+
+    text = "📜 <b>Последние обработанные письма:</b>\n\n"
+    for item in history:
+        icon = "🔴" if item["is_important"] else "⚪️"
+        sender = item.get("sender") or "—"
+        subject = item.get("subject") or "—"
+        date = item["processed_at"].strftime("%d.%m %H:%M") if item.get("processed_at") else ""
+        text += f"{icon} <b>{subject}</b>\n   От: {sender} | {date}\n\n"
+
+    await message.answer(text, parse_mode="HTML")
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message, user_use_case: ManageUsersUseCase):
+    if not await check_access(message): return
+
+    stats = await user_use_case.get_stats(tg_id=message.from_user.id)
+
+    text = (
+        "📊 <b>Статистика:</b>\n\n"
+        f"📬 Всего обработано писем: <b>{stats['total_processed']}</b>\n"
+        f"🔴 Из них важных: <b>{stats['important_count']}</b>\n"
+        f"💾 Записей в AI-кэше: <b>{stats['cache_total']}</b>"
+    )
+
+    await message.answer(text, parse_mode="HTML")

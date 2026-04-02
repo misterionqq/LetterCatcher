@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import List, Optional
-from src.core.entities import EmailMessage, User, Keyword
+from src.core.entities import EmailMessage, User, Keyword, PendingNotification
 
 class IEmailRepository(ABC):
     @abstractmethod
@@ -45,7 +45,29 @@ class IUserRepository(ABC):
         pass
 
     @abstractmethod
-    async def mark_email_processed(self, user_id: int, email_uid: str) -> None:
+    async def mark_email_processed(self, user_id: int, email_uid: str,
+                                   sender: str = "", subject: str = "",
+                                   is_important: bool = False) -> None:
+        pass
+
+    @abstractmethod
+    async def get_email_history(self, user_id: int, limit: int = 10) -> List[dict]:
+        pass
+
+    @abstractmethod
+    async def get_user_stats(self, user_id: int) -> dict:
+        pass
+
+    @abstractmethod
+    async def add_pending_notification(self, notification: PendingNotification) -> None:
+        pass
+
+    @abstractmethod
+    async def get_pending_notifications(self, user_id: int) -> List[PendingNotification]:
+        pass
+
+    @abstractmethod
+    async def clear_pending_notifications(self, user_id: int) -> None:
         pass
 
 class ICacheRepository(ABC):
@@ -55,6 +77,10 @@ class ICacheRepository(ABC):
 
     @abstractmethod
     async def save_cached_result(self, text_hash: str, is_important: bool, reason: str) -> None:
+        pass
+
+    @abstractmethod
+    async def get_total_cached(self) -> int:
         pass
 
 class IAIAnalyzer(ABC):

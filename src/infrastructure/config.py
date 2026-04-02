@@ -16,6 +16,11 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 LLM_MODEL = os.getenv("LLM_MODEL")
 
+LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_FILE = os.getenv("LOG_FILE", "bot.log")
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", 5_242_880))
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", 3))
+
 if not EMAIL_USER or not EMAIL_PASSWORD:
     raise ValueError("Missing EMAIL_USER or EMAIL_PASSWORD in .env")
 if not TELEGRAM_BOT_TOKEN:

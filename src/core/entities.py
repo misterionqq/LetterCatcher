@@ -17,6 +17,19 @@ class Keyword:
     is_stop_word: bool = False
 
 @dataclass
+class PendingNotification:
+    user_id: int = 0
+    email_uid: str = ""
+    sender: str = ""
+    subject: str = ""
+    body_snippet: str = ""
+    ai_reason: str = ""
+    triggered_word: Optional[str] = None
+    action_url: Optional[str] = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    id: Optional[int] = None
+
+@dataclass
 class User:
     telegram_id: int
     email: Optional[str] = None

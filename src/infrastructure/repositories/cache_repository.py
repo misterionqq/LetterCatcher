@@ -1,5 +1,5 @@
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from src.core.interfaces import ICacheRepository
 from src.infrastructure.database.models import EmailCacheModel
@@ -23,3 +23,8 @@ class SQLAlchemyCacheRepository(ICacheRepository):
             model = EmailCacheModel(text_hash=text_hash, is_important=is_important, reason=reason)
             session.add(model)
             await session.commit()
+
+    async def get_total_cached(self) -> int:
+        async with self.session_factory() as session:
+            result = await session.scalar(select(func.count()).select_from(EmailCacheModel))
+            return result or 0
