@@ -3,5 +3,8 @@ services:
     build: .
     restart: always
     env_file: .env
+    ports:
+      - "${API_PORT:-8000}:8000"
     volumes:
       - ./app.db:/app/app.db
+      - ./logs:/app/logs
