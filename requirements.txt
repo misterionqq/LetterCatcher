@@ -6,6 +6,9 @@ aiogram>=3.4.0
 beautifulsoup4>=4.12.3
 aiohttp>=3.9.3
 
+# PostgreSQL async driver
+asyncpg>=0.29.0
+
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-jose[cryptography]>=3.3.0

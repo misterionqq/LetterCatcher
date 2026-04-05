@@ -26,6 +26,9 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
 API_PORT = int(os.getenv("API_PORT", 8000))
 
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")  # TODO: вставить когда сделаю домен вида "https://yourdomain.com"
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook/telegram")
+
 if not EMAIL_USER or not EMAIL_PASSWORD:
     raise ValueError("Missing EMAIL_USER or EMAIL_PASSWORD in .env")
 if not TELEGRAM_BOT_TOKEN:

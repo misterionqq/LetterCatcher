@@ -1,12 +1,17 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, status
+from jose import JWTError, jwt
+from sqlalchemy import text
 
 from src.use_cases.manage_users import ManageUsersUseCase
+from src.infrastructure.config import JWT_SECRET_KEY, JWT_ALGORITHM
+from src.infrastructure.database.setup import AsyncSessionLocal
 from src.presentation.api.security import create_access_token, get_current_user_id
-from src.presentation.api.dependencies import get_user_use_case
+from src.presentation.api.dependencies import get_user_use_case, get_scanner
+from src.presentation.api.ws_manager import ws_manager
 from src.presentation.api.schemas import (
-    TokenRequest, TokenResponse,
+    TokenRequest, RegisterRequest, TokenResponse,
     UserOut, KeywordOut, SetEmailRequest, SetSensitivityRequest,
     AddKeywordRequest, AddStopWordRequest,
     EmailHistoryItem, StatsOut,
@@ -21,7 +26,18 @@ router = APIRouter()
 
 @router.get("/health", response_model=HealthOut, tags=["system"])
 async def health():
-    return HealthOut()
+    db_status = "ok"
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "error"
+
+    scanner = get_scanner()
+    scanner_status = "running" if scanner and scanner.is_running else "stopped"
+
+    overall = "ok" if db_status == "ok" else "degraded"
+    return HealthOut(status=overall, database=db_status, scanner=scanner_status)
 
 
 # ============= Auth =============
@@ -34,6 +50,19 @@ async def get_token(
     user = await uc.get_user_profile(body.telegram_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not registered. Use the Telegram bot first.")
+    token = create_access_token(body.telegram_id)
+    return TokenResponse(access_token=token)
+
+
+@router.post("/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
+async def register(
+    body: RegisterRequest,
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    """Register a new user from the web app (or log in if already registered).
+    If the user already exists, their email is updated only when a new email is provided.
+    Returns a JWT access token."""
+    await uc.register_or_update_user(body.telegram_id, email=body.email)
     token = create_access_token(body.telegram_id)
     return TokenResponse(access_token=token)
 
@@ -165,3 +194,22 @@ async def get_stats(
 ):
     stats = await uc.get_stats(tg_id)
     return StatsOut(**stats)
+
+
+# ============= WebSocket =============
+
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        user_id = int(payload["sub"])
+    except (JWTError, KeyError, ValueError):
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    await ws_manager.connect(user_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(user_id, websocket)

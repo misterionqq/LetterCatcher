@@ -10,6 +10,18 @@ from src.core.entities import PendingNotification
 from src.core.interfaces import IEmailRepository, IUserRepository, IAIAnalyzer, ICacheRepository
 from src.infrastructure.config import APP_MODE, ADMIN_TG_ID
 
+_ws_manager = None
+
+def _get_ws_manager():
+    global _ws_manager
+    if _ws_manager is None:
+        try:
+            from src.presentation.api.ws_manager import ws_manager
+            _ws_manager = ws_manager
+        except ImportError:
+            pass
+    return _ws_manager
+
 
 class MailScanner:
     def __init__(self, email_repo: IEmailRepository, user_repo: IUserRepository, bot: Bot, ai_analyzer: IAIAnalyzer, cache_repo: ICacheRepository):
@@ -153,6 +165,19 @@ class MailScanner:
                             logging.error(f"Не удалось отправить сообщение в TG (попытка {attempt + 1}): {e}")
                             if attempt == 0:
                                 await asyncio.sleep(5)
+
+                    mgr = _get_ws_manager()
+                    if mgr and mgr.has_connections(target_tg_id):
+                        await mgr.send_to_user(target_tg_id, {
+                            "type": "email_notification",
+                            "email_uid": email.uid,
+                            "sender": email.sender,
+                            "subject": email.subject,
+                            "body_snippet": email.body[:250],
+                            "ai_reason": ai_reason,
+                            "triggered_word": triggered_word,
+                            "action_url": action_url,
+                        })
 
             await self.user_repo.mark_email_processed(
                 target_tg_id, email.uid,

@@ -10,6 +10,12 @@ class TokenRequest(BaseModel):
     telegram_hash: str = Field(..., description="HMAC-SHA256 hash for Telegram Login Widget verification")
 
 
+class RegisterRequest(BaseModel):
+    telegram_id: int
+    telegram_hash: str = Field(..., description="HMAC-SHA256 hash for Telegram Login Widget verification")
+    email: Optional[str] = Field(None, description="Corporate email address (can be set later)")
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -89,3 +95,18 @@ class PendingNotificationOut(BaseModel):
 
 class HealthOut(BaseModel):
     status: str = "ok"
+    database: str = "ok"
+    scanner: str = "unknown"
+
+
+# --- WebSocket notification ---
+
+class WsNotification(BaseModel):
+    type: str = "email_notification"
+    email_uid: str
+    sender: str
+    subject: str
+    body_snippet: str
+    ai_reason: str
+    triggered_word: Optional[str] = None
+    action_url: Optional[str] = None
