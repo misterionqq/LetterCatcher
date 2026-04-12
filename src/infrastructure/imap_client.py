@@ -5,12 +5,16 @@ import re
 from datetime import datetime, timedelta
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
-from typing import List
+from typing import Any, Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup
 
 from src.core.interfaces import IEmailRepository
 from src.core.entities import EmailMessage
 from src.infrastructure.config import APP_MODE, EMAIL_USER
+
+_LINK_NOISE = ("unsubscribe", "track", "pixel", "open.php", "click.php", "beacon",
+               "list-unsubscribe", "mailto:", "javascript:")
+
 
 class ImapEmailRepository(IEmailRepository):
     def __init__(self, imap_server: str, email_user: str, email_password: str):
@@ -18,7 +22,7 @@ class ImapEmailRepository(IEmailRepository):
         self.user = email_user
         self.password = email_password
         self.connection = None
-    
+
     async def connect(self):
         await asyncio.to_thread(self._connect_sync)
 
@@ -47,17 +51,23 @@ class ImapEmailRepository(IEmailRepository):
                 pass
 
     def _get_unread_sync(self, limit: int) -> List[EmailMessage]:
+        try:
+            return self._fetch_unread_sync(limit)
+        except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError):
+            self.connection = None
+            self._connect_sync()
+            return self._fetch_unread_sync(limit)
+
+    def _fetch_unread_sync(self, limit: int) -> List[EmailMessage]:
         if not self.connection:
             self._connect_sync()
 
         self.connection.select("INBOX")
-        
 
         date_since = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
-        
         search_criteria = f'(UNSEEN SINCE "{date_since}")'
         status, messages = self.connection.search(None, search_criteria)
-        
+
         if status != "OK" or not messages[0]:
             return []
 
@@ -67,35 +77,38 @@ class ImapEmailRepository(IEmailRepository):
         result_messages = []
         for e_id in reversed(latest_email_ids):
             res, msg_data = self.connection.fetch(e_id, "(RFC822)")
-            
+
             for response_part in msg_data:
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
-                    
+
                     subject = self._decode_header_part(msg.get("Subject", "(Без темы)"))
-                    
                     sender = self._decode_header_part(msg.get("From", "Неизвестно"))
-                    
+
                     date_str = msg.get("Date")
                     try:
                         date_obj = parsedate_to_datetime(date_str) if date_str else datetime.now()
                     except:
                         date_obj = datetime.now()
 
-                    body = self._extract_clean_body(msg)
-
-                    recipient = self._determine_recipient(msg, body)
+                    plain_body, html_body = self._parse_body(msg)
+                    links = self._extract_links(html_body, plain_body)
+                    attachments = self._extract_attachments(msg)
+                    recipient = self._determine_recipient(msg, plain_body)
 
                     email_entity = EmailMessage(
                         uid=e_id.decode(),
                         sender=sender,
                         subject=subject,
-                        body=body,
+                        body=plain_body,
                         date=date_obj,
-                        recipient_email=recipient
+                        recipient_email=recipient,
+                        body_html=html_body or None,
+                        links=links,
+                        attachments=attachments,
                     )
                     result_messages.append(email_entity)
-        
+
         return result_messages
 
     def _decode_header_part(self, header_raw: str) -> str:
@@ -108,18 +121,16 @@ class ImapEmailRepository(IEmailRepository):
                 result += part
         return result
 
-    def _extract_clean_body(self, msg) -> str:
+    def _parse_body(self, msg) -> Tuple[str, str]:
         body_text = ""
         body_html = ""
 
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
-                disp = str(part.get("Content-Disposition"))
-
+                disp = str(part.get("Content-Disposition", ""))
                 if "attachment" in disp:
                     continue
-
                 if content_type == "text/plain":
                     try:
                         body_text += part.get_payload(decode=True).decode(errors="ignore")
@@ -141,26 +152,95 @@ class ImapEmailRepository(IEmailRepository):
             except:
                 pass
 
-        if body_text.strip():
-            return body_text.strip()
-        elif body_html.strip():
+        if not body_text.strip() and body_html.strip():
             soup = BeautifulSoup(body_html, "html.parser")
-            return soup.get_text(separator="\n", strip=True)
-        
-        return "(Пустое письмо или нечитаемый формат)"
+            body_text = soup.get_text(separator="\n", strip=True)
+
+        return (
+            body_text.strip() or "(Пустое письмо или нечитаемый формат)",
+            body_html.strip(),
+        )
+
+    def _extract_links(self, html_body: str, plain_body: str) -> List[str]:
+        seen = set()
+        links = []
+
+        def _add(url: str):
+            url = url.strip().rstrip(".,;)")
+            if len(url) < 10 or len(url) > 500:
+                return
+            if any(n in url.lower() for n in _LINK_NOISE):
+                return
+            if url not in seen:
+                seen.add(url)
+                links.append(url)
+
+        if html_body:
+            soup = BeautifulSoup(html_body, "html.parser")
+            for tag in soup.find_all("a", href=True):
+                href = tag["href"].strip()
+                if href.startswith("http"):
+                    _add(href)
+        else:
+            for match in re.finditer(r'https?://[^\s<>"\'\]]+', plain_body):
+                _add(match.group(0))
+
+        return links
+
+    def _extract_attachments(self, msg) -> List[Dict[str, Any]]:
+        attachments = []
+        if not msg.is_multipart():
+            return attachments
+
+        for part in msg.walk():
+            disp = str(part.get("Content-Disposition", ""))
+            if "attachment" not in disp:
+                continue
+            filename_raw = part.get_filename()
+            if not filename_raw:
+                continue
+            filename = self._decode_header_part(filename_raw)
+            content_type = part.get_content_type()
+            try:
+                payload = part.get_payload(decode=True)
+                size = len(payload) if payload else 0
+            except:
+                size = 0
+            attachments.append({
+                "name": filename,
+                "content_type": content_type,
+                "size": size,
+            })
+
+        return attachments
 
     def _determine_recipient(self, msg, body: str) -> str:
         if APP_MODE == "personal":
             return self.user
 
-        forwarded_to = msg.get("X-Forwarded-To") or msg.get("Delivered-To")
-        if forwarded_to:
-            return self._decode_header_part(forwarded_to)
-        
-        match = re.search(r"To:\s*([\w\.-]+@[\w\.-]+)", body)
+        for header in ("To", "X-Original-To"):
+            value = msg.get(header)
+            if value:
+                decoded = self._decode_header_part(value)
+                match = re.search(r"[\w\.\+\-]+@[\w\.\-]+", decoded)
+                if match:
+                    addr = match.group(0)
+                    if addr.lower() != self.user.lower():
+                        return addr
+
+        for header in ("X-Forwarded-To", "Delivered-To"):
+            value = msg.get(header)
+            if value:
+                decoded = self._decode_header_part(value)
+                match = re.search(r"[\w\.\+\-]+@[\w\.\-]+", decoded)
+                if match:
+                    addr = match.group(0)
+                    if addr.lower() != self.user.lower():
+                        return addr
+
+        match = re.search(r"To:\s*([\w\.\+\-]+@[\w\.\-]+)", body)
         if match:
             return match.group(1)
 
-        return self.user 
-    
+        return self.user
     

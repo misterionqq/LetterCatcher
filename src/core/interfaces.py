@@ -17,6 +17,10 @@ class IEmailRepository(ABC):
 
 class IUserRepository(ABC):
     @abstractmethod
+    async def get_by_id(self, user_id: int) -> Optional[User]:
+        pass
+
+    @abstractmethod
     async def get_by_telegram_id(self, tg_id: int) -> Optional[User]:
         pass
 
@@ -25,19 +29,19 @@ class IUserRepository(ABC):
         pass
 
     @abstractmethod
-    async def save_user(self, user: User) -> None:
+    async def save_user(self, user: User) -> "User":
         pass
 
     @abstractmethod
-    async def add_keyword(self, tg_id: int, keyword: Keyword) -> None:
+    async def add_keyword(self, user_id: int, keyword: Keyword) -> None:
         pass
 
     @abstractmethod
-    async def remove_keyword(self, tg_id: int, word: str) -> None:
+    async def remove_keyword(self, user_id: int, word: str) -> None:
         pass
 
     @abstractmethod
-    async def set_dnd(self, tg_id: int, is_dnd: bool) -> None:
+    async def set_dnd(self, user_id: int, is_dnd: bool) -> None:
         pass
 
     @abstractmethod
@@ -47,7 +51,7 @@ class IUserRepository(ABC):
     @abstractmethod
     async def mark_email_processed(self, user_id: int, email_uid: str,
                                    sender: str = "", subject: str = "",
-                                   is_important: bool = False) -> None:
+                                   is_important: bool = False, **kwargs) -> None:
         pass
 
     @abstractmethod

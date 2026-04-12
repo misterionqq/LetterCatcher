@@ -1,19 +1,26 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 
 # --- Auth ---
 
 class TokenRequest(BaseModel):
+    """Telegram-based login (for users who registered via the bot)."""
     telegram_id: int
-    telegram_hash: str = Field(..., description="HMAC-SHA256 hash for Telegram Login Widget verification")
+    telegram_hash: str = Field(..., description="HMAC-SHA256 hash for Telegram Login Widget (not yet verified)")
 
 
-class RegisterRequest(BaseModel):
-    telegram_id: int
-    telegram_hash: str = Field(..., description="HMAC-SHA256 hash for Telegram Login Widget verification")
-    email: Optional[str] = Field(None, description="Corporate email address (can be set later)")
+class WebRegisterRequest(BaseModel):
+    """Web / mobile registration with email + password."""
+    email: str
+    password: str = Field(..., min_length=8)
+
+
+class WebLoginRequest(BaseModel):
+    """Web / mobile login with email + password."""
+    email: str
+    password: str
 
 
 class TokenResponse(BaseModel):
@@ -29,7 +36,7 @@ class KeywordOut(BaseModel):
 
 
 class UserOut(BaseModel):
-    telegram_id: int
+    telegram_id: Optional[int] = None
     email: Optional[str] = None
     ai_sensitivity: str
     is_dnd: bool
@@ -52,6 +59,21 @@ class AddStopWordRequest(BaseModel):
     word: str = Field(..., min_length=1, max_length=100)
 
 
+# --- Device token (FCM push) ---
+
+class DeviceTokenRequest(BaseModel):
+    token: str = Field(..., min_length=1)
+    platform: str = Field(default="android", pattern="^(android|ios|web)$")
+
+
+# --- Common ---
+
+class AttachmentInfo(BaseModel):
+    name: str
+    content_type: str
+    size: int  # bytes
+
+
 # --- Email history ---
 
 class EmailHistoryItem(BaseModel):
@@ -60,6 +82,14 @@ class EmailHistoryItem(BaseModel):
     subject: Optional[str] = None
     is_important: bool
     processed_at: Optional[datetime] = None
+    date: Optional[str] = None
+    body_full: str = ""
+    body_html: Optional[str] = None
+    ai_reason: str = ""
+    triggered_word: Optional[str] = None
+    action_url: Optional[str] = None
+    links: List[str] = []
+    attachments: List[AttachmentInfo] = []
 
 
 # --- Stats ---
@@ -85,6 +115,10 @@ class PendingNotificationOut(BaseModel):
     sender: str
     subject: str
     body_snippet: str
+    body_full: str = ""
+    body_html: Optional[str] = None
+    links: List[str] = []
+    attachments: List[AttachmentInfo] = []
     ai_reason: str
     triggered_word: Optional[str] = None
     action_url: Optional[str] = None
@@ -106,7 +140,13 @@ class WsNotification(BaseModel):
     email_uid: str
     sender: str
     subject: str
+    date: Optional[str] = None
+    is_important: bool = False
     body_snippet: str
-    ai_reason: str
+    body_full: str = ""
+    body_html: Optional[str] = None
+    links: List[str] = []
+    attachments: List[AttachmentInfo] = []
+    ai_reason: str = ""
     triggered_word: Optional[str] = None
     action_url: Optional[str] = None

@@ -26,17 +26,26 @@ async def check_access(message: Message) -> bool:
     return True
 
 
+async def _get_user(tg_id: int, uc: ManageUsersUseCase, message: Message):
+    """Resolve telegram_id to User entity. Sends error and returns None if not found."""
+    user = await uc.get_user_profile_by_tg_id(tg_id)
+    if not user:
+        await message.answer("Сначала нажмите /start")
+    return user
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
-    user = await user_use_case.register_or_update_user(tg_id=message.from_user.id)
+    user = await user_use_case.register_telegram_user(tg_id=message.from_user.id)
 
     if APP_MODE == "centralized" and not user.email:
         await message.answer(
             "👋 Привет! Я — <b>LetterCatcher</b>.\n\n"
             "Для работы в корпоративном режиме укажите ваш рабочий email:",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         await state.set_state(UserSettingsStates.waiting_for_email)
         return
@@ -51,7 +60,7 @@ async def _send_welcome(message: Message):
         "🔕 /dnd — Не беспокоить (вкл/выкл)\n"
         "➕ /add — Добавить ключевое слово (триггер)\n"
         "🚫 /stop — Добавить стоп-слово\n"
-        "➖ /remove — Удалить слово (например: /remove раздача)\n"
+        "➖ /remove — Удалить слово (например: /remove реклама)\n"
         "📜 /history — Последние обработанные письма\n"
         "📊 /stats — Статистика"
     )
@@ -79,9 +88,13 @@ async def _send_welcome(message: Message):
 
 @router.message(UserSettingsStates.waiting_for_email)
 async def process_email_registration(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
+        return
+
     email_input = message.text.strip().lower()
     try:
-        await user_use_case.set_email(tg_id=message.from_user.id, email=email_input)
+        await user_use_case.set_email(user_id=user.id, email=email_input)
     except ValueError:
         await message.answer("❌ Неверный формат email. Попробуйте ещё раз:", parse_mode="HTML")
         return
@@ -92,11 +105,11 @@ async def process_email_registration(message: Message, state: FSMContext, user_u
 
 @router.message(Command("profile"))
 async def cmd_profile(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
-    user = await user_use_case.get_user_profile(message.from_user.id)
+    user = await _get_user(message.from_user.id, user_use_case, message)
     if not user:
-        await message.answer("Сначала нажмите /start")
         return
 
     sensitivity_label = _SENSITIVITY_LABELS.get(user.ai_sensitivity, user.ai_sensitivity)
@@ -128,22 +141,23 @@ async def cmd_profile(message: Message, user_use_case: ManageUsersUseCase):
 
 @router.message(Command("sensitivity"))
 async def cmd_sensitivity(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
-    user = await user_use_case.get_user_profile(message.from_user.id)
+    user = await _get_user(message.from_user.id, user_use_case, message)
     current = user.ai_sensitivity if user else "medium"
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text=f"{'✅ ' if current == lvl else ''}{label}",
-            callback_data=f"sensitivity_{lvl}"
+            callback_data=f"sensitivity_{lvl}",
         )]
         for lvl, label in _SENSITIVITY_LABELS.items()
     ])
 
     await message.answer(
         "⚙️ Выберите уровень чувствительности фильтров:",
-        reply_markup=keyboard
+        reply_markup=keyboard,
     )
 
 
@@ -154,13 +168,18 @@ async def callback_sensitivity(call: CallbackQuery, user_use_case: ManageUsersUs
         await call.answer("Неверный уровень.")
         return
 
-    await user_use_case.set_sensitivity(tg_id=call.from_user.id, level=level)
+    user = await user_use_case.get_user_profile_by_tg_id(call.from_user.id)
+    if not user:
+        await call.answer("Сначала /start")
+        return
+
+    await user_use_case.set_sensitivity(user_id=user.id, level=level)
     label = _SENSITIVITY_LABELS[level]
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text=f"{'✅ ' if lvl == level else ''}{lbl}",
-            callback_data=f"sensitivity_{lvl}"
+            callback_data=f"sensitivity_{lvl}",
         )]
         for lvl, lbl in _SENSITIVITY_LABELS.items()
     ])
@@ -171,16 +190,21 @@ async def callback_sensitivity(call: CallbackQuery, user_use_case: ManageUsersUs
 
 @router.message(Command("email"))
 async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         await message.answer("Укажите email. Пример: <code>/email user@mail.ru</code>", parse_mode="HTML")
         return
 
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
+        return
+
     email = parts[1].strip().lower()
     try:
-        await user_use_case.set_email(tg_id=message.from_user.id, email=email)
+        await user_use_case.set_email(user_id=user.id, email=email)
     except ValueError:
         await message.answer("❌ Неверный формат email. Пример: <code>/email user@mail.ru</code>", parse_mode="HTML")
         return
@@ -189,9 +213,14 @@ async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
 
 @router.message(Command("dnd"))
 async def cmd_dnd(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
-    new_state, pending = await user_use_case.toggle_dnd(tg_id=message.from_user.id)
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
+        return
+
+    new_state, pending = await user_use_case.toggle_dnd(user_id=user.id)
     if new_state:
         await message.answer("🔕 Режим «Не беспокоить» <b>включен</b>. Уведомления приостановлены.", parse_mode="HTML")
     else:
@@ -199,7 +228,7 @@ async def cmd_dnd(message: Message, user_use_case: ManageUsersUseCase):
             await message.answer(
                 f"🔔 Режим «Не беспокоить» <b>выключен</b>.\n"
                 f"📩 Отправляю {len(pending)} отложенных уведомлений...",
-                parse_mode="HTML"
+                parse_mode="HTML",
             )
             for notif in pending:
                 msg = _format_notification(
@@ -215,77 +244,102 @@ async def cmd_dnd(message: Message, user_use_case: ManageUsersUseCase):
 
 
 @router.message(Command("add"))
-async def cmd_add_keyword(message: Message, state: FSMContext):
-    if not await check_access(message): return
+async def cmd_add_keyword(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
+    if not await check_access(message):
+        return
 
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
+        return
+
+    await state.update_data(user_id=user.id)
     await message.answer(
-        "✏️ Напишите ключевое слово или фразу, которую нужно отслеживать (например: <i>запись на курс</i>):",
-        parse_mode="HTML"
+        "✏️ Напишите ключевое слово или фразу (например: <i>дедлайн</i>):",
+        parse_mode="HTML",
     )
     await state.set_state(UserSettingsStates.waiting_for_keyword)
 
 
 @router.message(UserSettingsStates.waiting_for_keyword)
 async def process_keyword(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
-    word = message.text.strip().lower()
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    if not user_id:
+        await state.clear()
+        return
 
+    word = message.text.strip().lower()
     try:
-        await user_use_case.add_trigger_word(tg_id=message.from_user.id, word=word)
+        await user_use_case.add_trigger_word(user_id=user_id, word=word)
     except ValueError:
         await message.answer(f"⚠️ Слово <b>'{word}'</b> уже есть в вашем списке.", parse_mode="HTML")
         await state.clear()
         return
 
-    await message.answer(f"✅ Слово <b>'{word}'</b> успешно добавлено в ваш список!", parse_mode="HTML")
+    await message.answer(f"✅ Слово <b>'{word}'</b> успешно добавлено!", parse_mode="HTML")
     await state.clear()
 
 
 @router.message(Command("stop"))
 async def cmd_stop_word(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         await message.answer(
             "Укажите стоп-слово. Пример: <code>/stop реклама</code>\n"
             "Письма с этим словом будут игнорироваться.",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
+        return
+
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
         return
 
     word = parts[1].strip().lower()
     try:
-        await user_use_case.add_stop_word(tg_id=message.from_user.id, word=word)
+        await user_use_case.add_stop_word(user_id=user.id, word=word)
     except ValueError:
         await message.answer(f"⚠️ Стоп-слово <b>'{word}'</b> уже есть в списке.", parse_mode="HTML")
         return
 
-    await message.answer(f"🚫 Стоп-слово <b>'{word}'</b> добавлено. Письма с ним будут игнорироваться.", parse_mode="HTML")
+    await message.answer(f"🚫 Стоп-слово <b>'{word}'</b> добавлено.", parse_mode="HTML")
 
 
 @router.message(Command("remove"))
 async def cmd_remove_keyword(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
         await message.answer(
             "Укажите слово для удаления. Пример: <code>/remove стипендия</code>",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return
 
-    word_to_remove = parts[1].strip().lower()
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
+        return
 
-    await user_use_case.user_repo.remove_keyword(tg_id=message.from_user.id, word=word_to_remove)
+    word_to_remove = parts[1].strip().lower()
+    await user_use_case.user_repo.remove_keyword(user_id=user.id, word=word_to_remove)
     await message.answer(f"🗑 Слово <b>'{word_to_remove}'</b> удалено (если оно было в списке).", parse_mode="HTML")
 
 
 @router.message(Command("history"))
 async def cmd_history(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
-    history = await user_use_case.get_email_history(tg_id=message.from_user.id, limit=10)
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
+        return
+
+    history = await user_use_case.get_email_history(user_id=user.id, limit=10)
     if not history:
         await message.answer("📜 История пуста — пока не обработано ни одного письма.")
         return
@@ -303,9 +357,14 @@ async def cmd_history(message: Message, user_use_case: ManageUsersUseCase):
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, user_use_case: ManageUsersUseCase):
-    if not await check_access(message): return
+    if not await check_access(message):
+        return
 
-    stats = await user_use_case.get_stats(tg_id=message.from_user.id)
+    user = await _get_user(message.from_user.id, user_use_case, message)
+    if not user:
+        return
+
+    stats = await user_use_case.get_stats(user_id=user.id)
 
     text = (
         "📊 <b>Статистика:</b>\n\n"

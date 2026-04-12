@@ -9,4 +9,7 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["python", "main.py"]
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+ENTRYPOINT ["./entrypoint.sh"]
