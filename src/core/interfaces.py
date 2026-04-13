@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import List, Optional
 from src.core.entities import EmailMessage, User, Keyword, PendingNotification
 
@@ -86,6 +87,26 @@ class ICacheRepository(ABC):
     @abstractmethod
     async def get_total_cached(self) -> int:
         pass
+
+class IVerificationTokenRepository(ABC):
+    @abstractmethod
+    async def create_token(self, user_id: int, token_type: str, expires_at: datetime,
+                           payload: str = None) -> str:
+        pass
+
+    @abstractmethod
+    async def get_valid_token(self, token: str, token_type: str) -> Optional[dict]:
+        """Returns {user_id, payload} if token is valid and not expired/used, else None."""
+        pass
+
+    @abstractmethod
+    async def mark_used(self, token: str) -> None:
+        pass
+
+    @abstractmethod
+    async def cleanup_expired(self) -> None:
+        pass
+
 
 class IAIAnalyzer(ABC):
     @abstractmethod

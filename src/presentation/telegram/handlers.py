@@ -98,7 +98,11 @@ async def process_email_registration(message: Message, state: FSMContext, user_u
     except ValueError:
         await message.answer("❌ Неверный формат email. Попробуйте ещё раз:", parse_mode="HTML")
         return
-    await message.answer(f"📧 Email <b>{email_input}</b> привязан к вашему профилю.", parse_mode="HTML")
+    await message.answer(
+        f"📧 Email <b>{email_input}</b> привязан к вашему профилю.\n"
+        "📩 На этот адрес отправлено письмо для подтверждения. Перейдите по ссылке в письме.",
+        parse_mode="HTML",
+    )
     await state.clear()
     await _send_welcome(message)
 
@@ -208,7 +212,11 @@ async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
     except ValueError:
         await message.answer("❌ Неверный формат email. Пример: <code>/email user@mail.ru</code>", parse_mode="HTML")
         return
-    await message.answer(f"📧 Email <b>{email}</b> привязан к вашему профилю.", parse_mode="HTML")
+    await message.answer(
+        f"📧 Email <b>{email}</b> привязан к вашему профилю.\n"
+        "📩 На этот адрес отправлено письмо для подтверждения.",
+        parse_mode="HTML",
+    )
 
 
 @router.message(Command("dnd"))

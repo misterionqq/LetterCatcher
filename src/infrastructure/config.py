@@ -41,6 +41,11 @@ JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 1440))
 API_PORT = int(os.getenv("API_PORT", 8000))
 
+# --- SMTP (email verification / password reset) ---
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
+
 # --- Firebase (FCM push) ---
 FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
 

@@ -15,6 +15,7 @@ class UserModel(Base):
     password_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     ai_sensitivity: Mapped[str] = mapped_column(String, default="medium")
     is_dnd: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 
     keywords: Mapped[List["KeywordModel"]] = relationship(
         "KeywordModel", back_populates="user", cascade="all, delete-orphan", lazy="selectin"
@@ -58,6 +59,19 @@ class DeviceTokenModel(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     token: Mapped[str] = mapped_column(String, index=True)
     platform: Mapped[str] = mapped_column(String, default="android")  # android / ios / web
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class VerificationTokenModel(Base):
+    __tablename__ = "verification_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    token: Mapped[str] = mapped_column(String, unique=True, index=True)
+    token_type: Mapped[str] = mapped_column(String)  # email_verify | password_reset | email_change
+    payload: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

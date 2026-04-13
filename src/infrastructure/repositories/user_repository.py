@@ -24,6 +24,7 @@ class SQLAlchemyUserRepository(IUserRepository):
             is_dnd=model.is_dnd,
             keywords=keywords,
             password_hash=model.password_hash,
+            email_verified=model.email_verified,
         )
 
     async def get_by_id(self, user_id: int) -> Optional[User]:
@@ -77,6 +78,7 @@ class SQLAlchemyUserRepository(IUserRepository):
                 model.password_hash = user.password_hash
             model.ai_sensitivity = user.ai_sensitivity
             model.is_dnd = user.is_dnd
+            model.email_verified = user.email_verified
 
             await session.commit()
             await session.refresh(model)

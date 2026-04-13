@@ -45,3 +45,4 @@ class User:
     is_dnd: bool = False
     keywords: List[Keyword] = field(default_factory=list)
     password_hash: Optional[str] = None   # None for telegram-only users
+    email_verified: bool = False

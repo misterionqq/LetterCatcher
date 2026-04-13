@@ -6,9 +6,14 @@ from datetime import datetime
 # --- Auth ---
 
 class TokenRequest(BaseModel):
-    """Telegram-based login (for users who registered via the bot)."""
-    telegram_id: int
-    telegram_hash: str = Field(..., description="HMAC-SHA256 hash for Telegram Login Widget (not yet verified)")
+    """Telegram Login Widget authentication data."""
+    id: int
+    first_name: str = ""
+    last_name: str = ""
+    username: str = ""
+    photo_url: str = ""
+    auth_date: int
+    hash: str
 
 
 class WebRegisterRequest(BaseModel):
@@ -38,6 +43,7 @@ class KeywordOut(BaseModel):
 class UserOut(BaseModel):
     telegram_id: Optional[int] = None
     email: Optional[str] = None
+    email_verified: bool = False
     ai_sensitivity: str
     is_dnd: bool
     keywords: List[KeywordOut] = []
@@ -123,6 +129,27 @@ class PendingNotificationOut(BaseModel):
     triggered_word: Optional[str] = None
     action_url: Optional[str] = None
     created_at: Optional[datetime] = None
+
+
+# --- Server info ---
+
+class ServerInfoOut(BaseModel):
+    app_mode: str
+    client_mode: str
+    forwarding_email: Optional[str] = None
+
+
+# --- Auth: password reset ---
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8)
+
+class MessageResponse(BaseModel):
+    message: str
 
 
 # --- Health ---

@@ -1,23 +1,30 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, Query, status
 from jose import JWTError, jwt
 from sqlalchemy import text
 
 from src.use_cases.manage_users import ManageUsersUseCase
-from src.infrastructure.config import JWT_SECRET_KEY, JWT_ALGORITHM
+from src.infrastructure.config import (
+    JWT_SECRET_KEY, JWT_ALGORITHM, APP_MODE, CLIENT_MODE, EMAIL_USER,
+    TELEGRAM_BOT_TOKEN, APP_BASE_URL,
+)
+from src.infrastructure.telegram_auth import verify_telegram_login
 from src.infrastructure.database.setup import AsyncSessionLocal
 from src.presentation.api.security import create_access_token, get_current_user_id
 from src.presentation.api.dependencies import get_user_use_case, get_scanner
 from src.presentation.api.ws_manager import ws_manager
+from src.presentation.api.rate_limit import limiter
 from src.presentation.api.schemas import (
     TokenRequest, WebRegisterRequest, WebLoginRequest, TokenResponse,
     UserOut, KeywordOut, SetEmailRequest, SetSensitivityRequest,
     AddKeywordRequest, AddStopWordRequest,
     DeviceTokenRequest,
+    ForgotPasswordRequest, ResetPasswordRequest, MessageResponse,
     EmailHistoryItem, StatsOut,
     DndToggleOut, PendingNotificationOut,
     HealthOut,
+    ServerInfoOut,
 )
 
 router = APIRouter()
@@ -41,16 +48,28 @@ async def health():
     return HealthOut(status=overall, database=db_status, scanner=scanner_status)
 
 
+@router.get("/settings/server-info", response_model=ServerInfoOut, tags=["system"])
+async def server_info():
+    """Public server configuration. No auth required."""
+    return ServerInfoOut(
+        app_mode=APP_MODE,
+        client_mode=CLIENT_MODE,
+        forwarding_email=EMAIL_USER if APP_MODE == "centralized" else None,
+    )
+
+
 # ============= Auth =============
 
 @router.post("/auth/web/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED, tags=["auth"])
+@limiter.limit("5/minute")
 async def web_register(
+    request: Request,
     body: WebRegisterRequest,
     uc: ManageUsersUseCase = Depends(get_user_use_case),
 ):
-    """Register a new user via email + password (web / mobile app)."""
+    """Register a new user via email + password. Sends verification email."""
     try:
-        user = await uc.register_web_user(body.email, body.password)
+        user = await uc.register_web_user(body.email, body.password, base_url=APP_BASE_URL)
     except ValueError as e:
         detail = str(e)
         if detail == "email_taken":
@@ -60,7 +79,9 @@ async def web_register(
 
 
 @router.post("/auth/web/login", response_model=TokenResponse, tags=["auth"])
+@limiter.limit("5/minute")
 async def web_login(
+    request: Request,
     body: WebLoginRequest,
     uc: ManageUsersUseCase = Depends(get_user_use_case),
 ):
@@ -72,15 +93,80 @@ async def web_login(
 
 
 @router.post("/auth/token", response_model=TokenResponse, tags=["auth"])
+@limiter.limit("3/minute")
 async def get_token(
+    request: Request,
     body: TokenRequest,
     uc: ManageUsersUseCase = Depends(get_user_use_case),
 ):
-    """Login via Telegram ID (for users registered through the Telegram bot)."""
-    user = await uc.get_user_profile_by_tg_id(body.telegram_id)
+    """Login via Telegram Login Widget (validates HMAC-SHA256 hash)."""
+    login_data = body.model_dump()
+    # Remove empty optional fields (Telegram omits them from hash calculation)
+    login_data = {k: str(v) for k, v in login_data.items() if v}
+    # Always keep required fields
+    login_data["id"] = str(body.id)
+    login_data["auth_date"] = str(body.auth_date)
+    login_data["hash"] = body.hash
+
+    if not TELEGRAM_BOT_TOKEN or not verify_telegram_login(login_data, TELEGRAM_BOT_TOKEN):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Telegram login data")
+
+    user = await uc.get_user_profile_by_tg_id(body.id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not registered. Use the Telegram bot first.")
     return TokenResponse(access_token=create_access_token(user.id))
+
+
+# ============= Email verification & Password reset =============
+
+@router.get("/auth/verify-email", response_model=MessageResponse, tags=["auth"])
+async def verify_email(
+    token: str = Query(...),
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    """Verify email address using the token from verification email."""
+    success = await uc.verify_email(token)
+    if not success:
+        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+    return MessageResponse(message="Email verified successfully")
+
+
+@router.get("/auth/verify-email-change", response_model=MessageResponse, tags=["auth"])
+async def verify_email_change(
+    token: str = Query(...),
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    """Confirm email change using the token sent to the new address."""
+    success = await uc.confirm_email_change(token)
+    if not success:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    return MessageResponse(message="Email changed successfully")
+
+
+@router.post("/auth/forgot-password", response_model=MessageResponse, tags=["auth"])
+@limiter.limit("3/minute")
+async def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    """Request a password reset email. Always returns success (prevents email enumeration)."""
+    await uc.request_password_reset(body.email, base_url=APP_BASE_URL)
+    return MessageResponse(message="If this email is registered, a reset link has been sent")
+
+
+@router.post("/auth/reset-password", response_model=MessageResponse, tags=["auth"])
+@limiter.limit("5/minute")
+async def reset_password(
+    request: Request,
+    body: ResetPasswordRequest,
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    """Reset password using the token from the reset email."""
+    success = await uc.reset_password(body.token, body.new_password)
+    if not success:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+    return MessageResponse(message="Password reset successfully")
 
 
 # ============= Profile =============
@@ -89,6 +175,7 @@ def _user_out(user) -> UserOut:
     return UserOut(
         telegram_id=user.telegram_id,
         email=user.email,
+        email_verified=user.email_verified,
         ai_sensitivity=user.ai_sensitivity,
         is_dnd=user.is_dnd,
         keywords=[KeywordOut(word=kw.word, is_stop_word=kw.is_stop_word) for kw in user.keywords],
@@ -106,17 +193,24 @@ async def get_profile(
     return _user_out(user)
 
 
-@router.put("/profile/email", response_model=UserOut, tags=["profile"])
+@router.put("/profile/email", response_model=MessageResponse, tags=["profile"])
 async def set_email(
     body: SetEmailRequest,
     user_id: int = Depends(get_current_user_id),
     uc: ManageUsersUseCase = Depends(get_user_use_case),
 ):
     try:
-        await uc.set_email(user_id, body.email)
-    except ValueError:
+        if uc.token_repo and uc.email_sender:
+            await uc.request_email_change(user_id, body.email, base_url=APP_BASE_URL)
+            return MessageResponse(message="Verification email sent to the new address")
+        else:
+            await uc.set_email(user_id, body.email, base_url=APP_BASE_URL)
+            return MessageResponse(message="Email updated (verification unavailable)")
+    except ValueError as e:
+        detail = str(e)
+        if detail == "email_taken":
+            raise HTTPException(status_code=409, detail="Email already in use")
         raise HTTPException(status_code=422, detail="Invalid email format")
-    return await get_profile(user_id=user_id, uc=uc)
 
 
 @router.put("/profile/sensitivity", response_model=UserOut, tags=["profile"])

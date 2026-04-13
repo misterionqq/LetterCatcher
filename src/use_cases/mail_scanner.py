@@ -77,6 +77,10 @@ class MailScanner:
                 logging.warning(f"Пропущено письмо: не найден адресат (recipient={email.recipient_email})")
                 continue
 
+            if APP_MODE == "centralized" and not getattr(user_profile, 'email_verified', True):
+                logging.warning(f"Пропущено письмо для user {user_profile.id}: email не верифицирован")
+                continue
+
             target_user_id = user_profile.id
 
             if await self.user_repo.is_email_processed(target_user_id, email.uid):

@@ -18,10 +18,13 @@ from src.infrastructure.config import (
     OPENROUTER_API_KEY, LLM_MODEL, LOG_DIR, LOG_FILE, LOG_MAX_BYTES,
     LOG_BACKUP_COUNT, API_PORT, WEBHOOK_URL, WEBHOOK_PATH,
     CLIENT_MODE, TELEGRAM_BOT_TOKEN,
+    SMTP_SERVER, SMTP_PORT,
 )
 from src.infrastructure.database.setup import init_db, AsyncSessionLocal
 from src.infrastructure.repositories.user_repository import SQLAlchemyUserRepository
 from src.infrastructure.repositories.cache_repository import SQLAlchemyCacheRepository
+from src.infrastructure.repositories.token_repository import SQLAlchemyTokenRepository
+from src.infrastructure.smtp_service import SmtpEmailSender
 from src.infrastructure.imap_client import ImapEmailRepository
 from src.infrastructure.openrouter_client import OpenRouterAnalyzer
 from src.use_cases.manage_users import ManageUsersUseCase
@@ -52,13 +55,21 @@ async def main():
 
     user_repo = SQLAlchemyUserRepository(session_factory=AsyncSessionLocal)
     cache_repo = SQLAlchemyCacheRepository(session_factory=AsyncSessionLocal)
+    token_repo = SQLAlchemyTokenRepository(session_factory=AsyncSessionLocal)
+    email_sender = SmtpEmailSender(
+        smtp_server=SMTP_SERVER, smtp_port=SMTP_PORT,
+        username=EMAIL_USER, password=EMAIL_PASSWORD,
+    )
     email_repo = ImapEmailRepository(
         imap_server=IMAP_SERVER,
         email_user=EMAIL_USER,
         email_password=EMAIL_PASSWORD,
     )
     ai_analyzer = OpenRouterAnalyzer(api_key=OPENROUTER_API_KEY, model=LLM_MODEL)
-    user_use_case = ManageUsersUseCase(user_repo=user_repo, cache_repo=cache_repo)
+    user_use_case = ManageUsersUseCase(
+        user_repo=user_repo, cache_repo=cache_repo,
+        token_repo=token_repo, email_sender=email_sender,
+    )
 
     # --- Telegram bot (optional) ---
     bot = None
