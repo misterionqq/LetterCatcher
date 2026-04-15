@@ -13,19 +13,21 @@ def _make_scanner(email_repo, user_repo, bot, ai_analyzer, cache_repo):
     return MailScanner(
         email_repo=email_repo,
         user_repo=user_repo,
-        bot=bot,
         ai_analyzer=ai_analyzer,
         cache_repo=cache_repo,
+        bot=bot,
     )
 
 
-def _user(sensitivity="medium", is_dnd=False, keywords=None):
+def _user(sensitivity="medium", is_dnd=False, keywords=None, email_verified=True):
     return User(
+        id=1,
         telegram_id=ADMIN_TG_ID,
         email="user@example.com",
         ai_sensitivity=sensitivity,
         is_dnd=is_dnd,
         keywords=keywords or [],
+        email_verified=email_verified,
     )
 
 
@@ -320,3 +322,45 @@ async def test_stop_sets_event(mock_email_repo, mock_user_repo, mock_bot, mock_a
 
     assert scanner._stop_event.is_set()
     assert not scanner.is_running
+
+
+# ============= Email verification in centralized mode =============
+
+@patch("src.use_cases.mail_scanner.APP_MODE", "centralized")
+@patch("src.use_cases.mail_scanner.ADMIN_TG_ID", ADMIN_TG_ID)
+async def test_centralized_unverified_email_skipped(mock_email_repo, mock_user_repo, mock_bot, mock_ai_analyzer, mock_cache_repo):
+    """In centralized mode, emails for unverified users should be skipped."""
+    mock_email_repo.get_unread_emails.return_value = [_email(recipient="unverified@co.com")]
+    mock_user_repo.get_by_email.return_value = _user(email_verified=False)
+
+    scanner = _make_scanner(mock_email_repo, mock_user_repo, mock_bot, mock_ai_analyzer, mock_cache_repo)
+    await scanner._check_mail_iteration()
+
+    mock_user_repo.mark_email_processed.assert_not_called()
+    mock_bot.send_message.assert_not_called()
+
+
+@patch("src.use_cases.mail_scanner.APP_MODE", "centralized")
+@patch("src.use_cases.mail_scanner.ADMIN_TG_ID", ADMIN_TG_ID)
+async def test_centralized_verified_email_processed(mock_email_repo, mock_user_repo, mock_bot, mock_ai_analyzer, mock_cache_repo):
+    """In centralized mode, emails for verified users should be processed normally."""
+    mock_email_repo.get_unread_emails.return_value = [_email(recipient="verified@co.com")]
+    mock_user_repo.get_by_email.return_value = _user(email_verified=True, sensitivity="low")
+
+    scanner = _make_scanner(mock_email_repo, mock_user_repo, mock_bot, mock_ai_analyzer, mock_cache_repo)
+    await scanner._check_mail_iteration()
+
+    mock_user_repo.mark_email_processed.assert_called_once()
+
+
+@patch("src.use_cases.mail_scanner.APP_MODE", "personal")
+@patch("src.use_cases.mail_scanner.ADMIN_TG_ID", ADMIN_TG_ID)
+async def test_personal_mode_ignores_email_verified(mock_email_repo, mock_user_repo, mock_bot, mock_ai_analyzer, mock_cache_repo):
+    """In personal mode, email_verified is not checked."""
+    mock_email_repo.get_unread_emails.return_value = [_email()]
+    mock_user_repo.get_by_telegram_id.return_value = _user(email_verified=False, sensitivity="low")
+
+    scanner = _make_scanner(mock_email_repo, mock_user_repo, mock_bot, mock_ai_analyzer, mock_cache_repo)
+    await scanner._check_mail_iteration()
+
+    mock_user_repo.mark_email_processed.assert_called_once()

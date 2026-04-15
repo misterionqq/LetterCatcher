@@ -1,6 +1,5 @@
 import os
 
-# Must come before any src.* imports to satisfy config.py validation
 os.environ.setdefault("EMAIL_USER", "test@example.com")
 os.environ.setdefault("EMAIL_PASSWORD", "testpass")
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "000000000:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
@@ -31,6 +30,7 @@ async def db_session_factory():
 @pytest.fixture
 def mock_user_repo():
     repo = AsyncMock()
+    repo.get_by_id = AsyncMock(return_value=None)
     repo.get_by_telegram_id = AsyncMock(return_value=None)
     repo.get_by_email = AsyncMock(return_value=None)
     repo.save_user = AsyncMock()
@@ -44,7 +44,29 @@ def mock_user_repo():
     repo.add_pending_notification = AsyncMock()
     repo.get_pending_notifications = AsyncMock(return_value=[])
     repo.clear_pending_notifications = AsyncMock()
+    repo.get_device_tokens = AsyncMock(return_value=[])
+    repo.save_device_token = AsyncMock()
+    repo.remove_device_tokens = AsyncMock()
     return repo
+
+
+@pytest.fixture
+def mock_token_repo():
+    repo = AsyncMock()
+    repo.create_token = AsyncMock(return_value="test-token-abc")
+    repo.get_valid_token = AsyncMock(return_value=None)
+    repo.mark_used = AsyncMock()
+    repo.cleanup_expired = AsyncMock()
+    return repo
+
+
+@pytest.fixture
+def mock_email_sender():
+    sender = AsyncMock()
+    sender.send_verification_email = AsyncMock()
+    sender.send_password_reset_email = AsyncMock()
+    sender.send_email_change_verification = AsyncMock()
+    return sender
 
 
 @pytest.fixture
@@ -84,6 +106,7 @@ def mock_ai_analyzer():
 @pytest.fixture
 def sample_user():
     return User(
+        id=1,
         telegram_id=111222333,
         email="user@example.com",
         ai_sensitivity="medium",

@@ -7,7 +7,7 @@ from sqlalchemy import text
 from src.use_cases.manage_users import ManageUsersUseCase
 from src.infrastructure.config import (
     JWT_SECRET_KEY, JWT_ALGORITHM, APP_MODE, CLIENT_MODE, EMAIL_USER,
-    TELEGRAM_BOT_TOKEN, APP_BASE_URL,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, APP_BASE_URL,
 )
 from src.infrastructure.telegram_auth import verify_telegram_login
 from src.infrastructure.database.setup import AsyncSessionLocal
@@ -55,6 +55,7 @@ async def server_info():
         app_mode=APP_MODE,
         client_mode=CLIENT_MODE,
         forwarding_email=EMAIL_USER if APP_MODE == "centralized" else None,
+        bot_username=TELEGRAM_BOT_USERNAME or None,
     )
 
 
@@ -141,6 +142,20 @@ async def verify_email_change(
     if not success:
         raise HTTPException(status_code=400, detail="Invalid or expired token")
     return MessageResponse(message="Email changed successfully")
+
+
+@router.post("/auth/resend-verification", response_model=MessageResponse, tags=["auth"])
+@limiter.limit("3/minute")
+async def resend_verification(
+    request: Request,
+    user_id: int = Depends(get_current_user_id),
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    """Resend email verification link. Requires auth."""
+    success = await uc.resend_verification(user_id, base_url=APP_BASE_URL)
+    if not success:
+        raise HTTPException(status_code=400, detail="Email already verified or not set")
+    return MessageResponse(message="Verification email sent")
 
 
 @router.post("/auth/forgot-password", response_model=MessageResponse, tags=["auth"])

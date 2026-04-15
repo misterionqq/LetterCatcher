@@ -137,6 +137,7 @@ class ServerInfoOut(BaseModel):
     app_mode: str
     client_mode: str
     forwarding_email: Optional[str] = None
+    bot_username: Optional[str] = None
 
 
 # --- Auth: password reset ---
