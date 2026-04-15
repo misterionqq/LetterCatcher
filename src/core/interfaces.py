@@ -75,6 +75,10 @@ class IUserRepository(ABC):
     async def clear_pending_notifications(self, user_id: int) -> None:
         pass
 
+    @abstractmethod
+    async def delete_user(self, user_id: int) -> None:
+        pass
+
 class ICacheRepository(ABC):
     @abstractmethod
     async def get_cached_result(self, text_hash: str) -> Optional[dict]:
@@ -91,12 +95,11 @@ class ICacheRepository(ABC):
 class IVerificationTokenRepository(ABC):
     @abstractmethod
     async def create_token(self, user_id: int, token_type: str, expires_at: datetime,
-                           payload: str = None) -> str:
+                           payload: str = None, token_value: str = None) -> str:
         pass
 
     @abstractmethod
     async def get_valid_token(self, token: str, token_type: str) -> Optional[dict]:
-        """Returns {user_id, payload} if token is valid and not expired/used, else None."""
         pass
 
     @abstractmethod

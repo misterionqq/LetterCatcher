@@ -39,6 +39,24 @@ async def cmd_start(message: Message, state: FSMContext, user_use_case: ManageUs
     if not await check_access(message):
         return
 
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1 and args[1].startswith("link_"):
+        token = args[1][5:]
+        try:
+            user = await user_use_case.confirm_web_link(token, message.from_user.id)
+            await message.answer(
+                f"✅ Telegram успешно привязан к аккаунту <b>{user.email}</b>!",
+                parse_mode="HTML",
+            )
+            await _send_welcome(message)
+        except ValueError as e:
+            err = str(e)
+            if err == "already_has_telegram":
+                await message.answer("❌ К этому аккаунту уже привязан другой Telegram.", parse_mode="HTML")
+            else:
+                await message.answer("❌ Ссылка недействительна или истекла. Попробуйте снова на сайте.", parse_mode="HTML")
+        return
+
     user = await user_use_case.register_telegram_user(tg_id=message.from_user.id)
 
     if APP_MODE == "centralized" and not user.email:
@@ -66,7 +84,7 @@ async def _send_welcome(message: Message):
     )
 
     if APP_MODE == "centralized":
-        commands = f"📧 /email — Изменить привязанную почту\n{common_commands}"
+        commands = f"📧 /email — Изменить привязанную почту\n🔗 /link — Привязать аккаунт с сайта\n{common_commands}"
         forwarding_hint = (
             "\n\n📬 <b>Настройте автопересылку писем:</b>\n"
             f"Перенаправьте входящие письма с корпоративной почты на:\n"
@@ -86,6 +104,78 @@ async def _send_welcome(message: Message):
     await message.answer(welcome_text, parse_mode="HTML")
 
 
+@router.message(Command("link"))
+async def cmd_link(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
+    if not await check_access(message):
+        return
+    await message.answer(
+        "🔗 <b>Привязка аккаунта</b>\n\n"
+        "Введите email, с которым вы регистрировались на сайте:",
+        parse_mode="HTML",
+    )
+    await state.set_state(UserSettingsStates.waiting_for_link_email)
+
+
+@router.message(UserSettingsStates.waiting_for_link_email)
+async def process_link_email(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
+    email = message.text.strip().lower()
+    try:
+        await user_use_case.request_telegram_link(message.from_user.id, email)
+    except ValueError as e:
+        err = str(e)
+        if err == "invalid_email":
+            await message.answer("❌ Неверный формат email.", parse_mode="HTML")
+            return
+        if err == "email_not_found":
+            await message.answer(
+                "❌ Аккаунт с таким email не найден. Сначала зарегистрируйтесь на сайте.",
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+        if err == "already_linked":
+            await message.answer("✅ Этот Telegram уже привязан к данному аккаунту.", parse_mode="HTML")
+            await state.clear()
+            return
+        if err == "email_has_telegram":
+            await message.answer(
+                "❌ К этому аккаунту уже привязан другой Telegram.",
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+        await message.answer("❌ Не удалось отправить код. Попробуйте позже.", parse_mode="HTML")
+        await state.clear()
+        return
+
+    await state.update_data(link_email=email)
+    await message.answer(
+        f"📩 На <b>{email}</b> отправлен 6-значный код.\n"
+        "Введите его здесь:",
+        parse_mode="HTML",
+    )
+    await state.set_state(UserSettingsStates.waiting_for_link_code)
+
+
+@router.message(UserSettingsStates.waiting_for_link_code)
+async def process_link_code(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
+    code = message.text.strip()
+    try:
+        user = await user_use_case.confirm_telegram_link(code, message.from_user.id)
+    except ValueError:
+        await message.answer("❌ Неверный или истёкший код. Попробуйте /link заново.", parse_mode="HTML")
+        await state.clear()
+        return
+
+    await state.clear()
+    await message.answer(
+        f"✅ Telegram успешно привязан к аккаунту <b>{user.email}</b>!\n"
+        "Теперь уведомления будут приходить и в Telegram, и на сайт.",
+        parse_mode="HTML",
+    )
+    await _send_welcome(message)
+
+
 @router.message(UserSettingsStates.waiting_for_email)
 async def process_email_registration(message: Message, state: FSMContext, user_use_case: ManageUsersUseCase):
     user = await _get_user(message.from_user.id, user_use_case, message)
@@ -95,8 +185,15 @@ async def process_email_registration(message: Message, state: FSMContext, user_u
     email_input = message.text.strip().lower()
     try:
         await user_use_case.set_email(user_id=user.id, email=email_input)
-    except ValueError:
-        await message.answer("❌ Неверный формат email. Попробуйте ещё раз:", parse_mode="HTML")
+    except ValueError as e:
+        if str(e) == "email_taken":
+            await message.answer(
+                "❌ Этот email уже привязан к другому аккаунту. "
+                "Если вы регистрировались через сайт, используйте /link для привязки.",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer("❌ Неверный формат email. Попробуйте ещё раз:", parse_mode="HTML")
         return
     await message.answer(
         f"📧 Email <b>{email_input}</b> привязан к вашему профилю.\n"
@@ -209,8 +306,15 @@ async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
     email = parts[1].strip().lower()
     try:
         await user_use_case.set_email(user_id=user.id, email=email)
-    except ValueError:
-        await message.answer("❌ Неверный формат email. Пример: <code>/email user@mail.ru</code>", parse_mode="HTML")
+    except ValueError as e:
+        if str(e) == "email_taken":
+            await message.answer(
+                "❌ Этот email уже привязан к другому аккаунту.\n"
+                "Используйте /link для привязки Telegram к существующему аккаунту.",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer("❌ Неверный формат email. Пример: <code>/email user@mail.ru</code>", parse_mode="HTML")
         return
     await message.answer(
         f"📧 Email <b>{email}</b> привязан к вашему профилю.\n"

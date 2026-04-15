@@ -20,6 +20,7 @@ from src.presentation.api.schemas import (
     UserOut, KeywordOut, SetEmailRequest, SetSensitivityRequest,
     AddKeywordRequest, AddStopWordRequest,
     DeviceTokenRequest,
+    LinkTelegramResponse,
     ForgotPasswordRequest, ResetPasswordRequest, MessageResponse,
     EmailHistoryItem, StatsOut,
     DndToggleOut, PendingNotificationOut,
@@ -264,6 +265,30 @@ async def get_pending_notifications(
         )
         for n in pending
     ]
+
+
+# ============= Account linking =============
+
+@router.post("/profile/link-telegram", response_model=LinkTelegramResponse, tags=["profile"])
+async def link_telegram(
+    user_id: int = Depends(get_current_user_id),
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    """Generate a Telegram deep link for account linking."""
+    user = await uc.get_user_profile(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.telegram_id:
+        raise HTTPException(status_code=409, detail="Telegram already linked")
+    try:
+        token = await uc.create_web_link_token(user_id)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Linking unavailable")
+    bot_username = TELEGRAM_BOT_USERNAME
+    if not bot_username:
+        raise HTTPException(status_code=503, detail="Telegram bot not configured")
+    link = f"https://t.me/{bot_username}?start=link_{token}"
+    return LinkTelegramResponse(link=link)
 
 
 # ============= Device tokens (FCM push) =============

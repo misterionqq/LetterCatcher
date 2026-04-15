@@ -149,6 +149,9 @@ class ResetPasswordRequest(BaseModel):
     token: str
     new_password: str = Field(..., min_length=8)
 
+class LinkTelegramResponse(BaseModel):
+    link: str
+
 class MessageResponse(BaseModel):
     message: str
 

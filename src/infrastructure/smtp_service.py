@@ -54,6 +54,17 @@ class SmtpEmailSender:
         )
         await self._send(to, "Password reset — LetterCatcher", html)
 
+    async def send_link_code(self, to: str, code: str) -> None:
+        html = (
+            "<h2>LetterCatcher — Привязка Telegram</h2>"
+            "<p>Код для привязки вашего Telegram аккаунта:</p>"
+            f'<p style="font-size:32px;font-weight:bold;letter-spacing:8px">{code}</p>'
+            "<p>Введите этот код в Telegram-боте.</p>"
+            "<p>Код действителен 10 минут.</p>"
+            "<p>Если вы не запрашивали привязку, проигнорируйте это письмо.</p>"
+        )
+        await self._send(to, "Код привязки Telegram — LetterCatcher", html)
+
     async def send_email_change_verification(self, to: str, token: str, base_url: str) -> None:
         link = f"{base_url}/api/v1/auth/verify-email-change?token={token}"
         html = (

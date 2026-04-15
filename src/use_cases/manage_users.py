@@ -1,4 +1,5 @@
 import logging
+import random
 import re
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -200,6 +201,9 @@ class ManageUsersUseCase:
     async def set_email(self, user_id: int, email: str, base_url: str = "") -> None:
         if not _EMAIL_RE.match(email):
             raise ValueError("invalid_email")
+        existing = await self.user_repo.get_by_email(email)
+        if existing and existing.id != user_id:
+            raise ValueError("email_taken")
         user = await self.user_repo.get_by_id(user_id)
         if user:
             user.email = email
@@ -232,3 +236,87 @@ class ManageUsersUseCase:
         user_stats = await self.user_repo.get_user_stats(user_id)
         cache_total = await self.cache_repo.get_total_cached() if self.cache_repo else 0
         return {**user_stats, "cache_total": cache_total}
+
+    # ------------------------------------------------------------------
+    # Account linking (Telegram <-> Web)
+    # ------------------------------------------------------------------
+
+    async def request_telegram_link(self, telegram_id: int, email: str) -> None:
+        """Send a 6-digit code to email so user can link their Telegram account."""
+        if not _EMAIL_RE.match(email):
+            raise ValueError("invalid_email")
+        existing = await self.user_repo.get_by_email(email)
+        if not existing:
+            raise ValueError("email_not_found")
+        if existing.telegram_id == telegram_id:
+            raise ValueError("already_linked")
+        if existing.telegram_id is not None:
+            raise ValueError("email_has_telegram")
+
+        if not self.token_repo or not self.email_sender:
+            raise ValueError("verification_unavailable")
+
+        code = f"{random.randint(0, 999999):06d}"
+        await self.token_repo.create_token(
+            user_id=existing.id,
+            token_type="telegram_link",
+            expires_at=datetime.utcnow() + timedelta(minutes=10),
+            payload=str(telegram_id),
+            token_value=code,
+        )
+        await self.email_sender.send_link_code(email, code)
+
+    async def confirm_telegram_link(self, code: str, telegram_id: int) -> User:
+        """Verify the 6-digit code and merge accounts."""
+        if not self.token_repo:
+            raise ValueError("verification_unavailable")
+        data = await self.token_repo.get_valid_token(code, "telegram_link")
+        if not data or str(data.get("payload")) != str(telegram_id):
+            raise ValueError("invalid_code")
+
+        user = await self.user_repo.get_by_id(data["user_id"])
+        if not user:
+            raise ValueError("user_not_found")
+
+        orphan = await self.user_repo.get_by_telegram_id(telegram_id)
+        if orphan and orphan.id != user.id:
+            await self.user_repo.delete_user(orphan.id)
+
+        user.telegram_id = telegram_id
+        await self.user_repo.save_user(user)
+        await self.token_repo.mark_used(code)
+        return user
+
+    async def create_web_link_token(self, user_id: int) -> str:
+        """Create a token for linking Telegram via deep link from the web."""
+        if not self.token_repo:
+            raise ValueError("verification_unavailable")
+        token = await self.token_repo.create_token(
+            user_id=user_id,
+            token_type="web_telegram_link",
+            expires_at=datetime.utcnow() + timedelta(minutes=10),
+        )
+        return token
+
+    async def confirm_web_link(self, token: str, telegram_id: int) -> User:
+        """Confirm deep-link-based Telegram linking initiated from the web."""
+        if not self.token_repo:
+            raise ValueError("verification_unavailable")
+        data = await self.token_repo.get_valid_token(token, "web_telegram_link")
+        if not data:
+            raise ValueError("invalid_token")
+
+        user = await self.user_repo.get_by_id(data["user_id"])
+        if not user:
+            raise ValueError("user_not_found")
+        if user.telegram_id is not None and user.telegram_id != telegram_id:
+            raise ValueError("already_has_telegram")
+
+        orphan = await self.user_repo.get_by_telegram_id(telegram_id)
+        if orphan and orphan.id != user.id:
+            await self.user_repo.delete_user(orphan.id)
+
+        user.telegram_id = telegram_id
+        await self.user_repo.save_user(user)
+        await self.token_repo.mark_used(token)
+        return user

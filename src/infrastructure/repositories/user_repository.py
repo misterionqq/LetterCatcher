@@ -239,6 +239,18 @@ class SQLAlchemyUserRepository(IUserRepository):
             await session.commit()
 
 
+    async def delete_user(self, user_id: int) -> None:
+        async with self.session_factory() as session:
+            await session.execute(delete(KeywordModel).where(KeywordModel.user_id == user_id))
+            await session.execute(delete(ProcessedEmailModel).where(ProcessedEmailModel.user_id == user_id))
+            await session.execute(delete(PendingNotificationModel).where(PendingNotificationModel.user_id == user_id))
+            await session.execute(delete(DeviceTokenModel).where(DeviceTokenModel.user_id == user_id))
+            result = await session.execute(select(UserModel).where(UserModel.id == user_id))
+            model = result.scalar_one_or_none()
+            if model:
+                await session.delete(model)
+            await session.commit()
+
     async def save_device_token(self, user_id: int, token: str, platform: str = "android") -> None:
         async with self.session_factory() as session:
             existing = await session.execute(

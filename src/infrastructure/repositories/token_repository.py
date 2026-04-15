@@ -13,8 +13,8 @@ class SQLAlchemyTokenRepository(IVerificationTokenRepository):
         self.session_factory = session_factory
 
     async def create_token(self, user_id: int, token_type: str, expires_at: datetime,
-                           payload: str = None) -> str:
-        token = secrets.token_urlsafe(32)
+                           payload: str = None, token_value: str = None) -> str:
+        token = token_value or secrets.token_urlsafe(32)
         async with self.session_factory() as session:
             model = VerificationTokenModel(
                 user_id=user_id,
