@@ -88,6 +88,8 @@ class ImapEmailRepository(IEmailRepository):
                     date_str = msg.get("Date")
                     try:
                         date_obj = parsedate_to_datetime(date_str) if date_str else datetime.now()
+                        if date_obj.tzinfo is not None:
+                            date_obj = date_obj.replace(tzinfo=None)
                     except:
                         date_obj = datetime.now()
 
