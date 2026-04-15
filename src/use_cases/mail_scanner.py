@@ -63,6 +63,7 @@ class MailScanner:
 
         for email in emails:
             user_profile = None
+            logging.info(f"Обработка: '{email.subject}' от {email.sender}, recipient={email.recipient_email}")
 
             if APP_MODE == "personal":
                 if ADMIN_TG_ID:
