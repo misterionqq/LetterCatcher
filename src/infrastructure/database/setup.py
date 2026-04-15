@@ -7,5 +7,4 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
 
 async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    pass  # Schema managed by Alembic migrations (entrypoint.sh runs alembic upgrade head)
