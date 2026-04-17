@@ -370,6 +370,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str = Query(...)):
         payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
         user_id = int(payload["sub"])
     except (JWTError, KeyError, ValueError):
+        await websocket.accept()
         await websocket.close(code=4001, reason="Invalid token")
         return
 
