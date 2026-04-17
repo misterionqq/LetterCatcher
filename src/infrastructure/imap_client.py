@@ -7,13 +7,57 @@ from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup
+import nh3
 
 from src.core.interfaces import IEmailRepository
 from src.core.entities import EmailMessage
-from src.infrastructure.config import APP_MODE, EMAIL_USER
+from src.infrastructure.config import APP_MODE, EMAIL_USER, SANITIZE_HTML
 
 _LINK_NOISE = ("unsubscribe", "track", "pixel", "open.php", "click.php", "beacon",
                "list-unsubscribe", "mailto:", "javascript:")
+
+_SAFE_TAGS = {
+    "div", "span", "p", "br", "hr", "center",
+    "b", "strong", "i", "em", "u", "s", "strike", "del", "ins",
+    "sub", "sup", "small", "font", "mark", "abbr", "code", "pre",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "dl", "dt", "dd",
+    "table", "tr", "td", "th", "thead", "tbody", "tfoot",
+    "caption", "col", "colgroup",
+    "a", "img",
+    "blockquote",
+    "style",
+}
+
+_SAFE_ATTRS = {
+    "*": {"style", "class", "id", "dir", "lang", "title",
+           "width", "height", "align", "valign", "bgcolor", "color"},
+    "a": {"href", "target", "name"},
+    "img": {"src", "alt", "border"},
+    "font": {"face", "size", "color"},
+    "table": {"border", "cellpadding", "cellspacing"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan", "scope"},
+    "col": {"span"},
+    "colgroup": {"span"},
+    "ol": {"start", "type"},
+    "li": {"value"},
+}
+
+
+def _sanitize_email_html(raw_html: str) -> str:
+    if not raw_html or not SANITIZE_HTML:
+        return raw_html
+    return nh3.clean(
+        raw_html,
+        tags=_SAFE_TAGS,
+        clean_content_tags={"script"},
+        attributes=_SAFE_ATTRS,
+        generic_attribute_prefixes={"data-"},
+        url_schemes={"http", "https", "mailto", "cid"},
+        strip_comments=True,
+        link_rel="noopener noreferrer",
+    )
 
 
 class ImapEmailRepository(IEmailRepository):
@@ -160,7 +204,7 @@ class ImapEmailRepository(IEmailRepository):
 
         return (
             body_text.strip() or "(Пустое письмо или нечитаемый формат)",
-            body_html.strip(),
+            _sanitize_email_html(body_html.strip()),
         )
 
     def _extract_links(self, html_body: str, plain_body: str) -> List[str]:

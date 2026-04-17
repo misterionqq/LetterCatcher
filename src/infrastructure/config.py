@@ -50,6 +50,9 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 # --- Firebase (FCM push) ---
 FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "")
 
+# --- HTML sanitization ---
+SANITIZE_HTML = os.getenv("SANITIZE_HTML", "true").lower() in ("true", "1", "yes")
+
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook/telegram")
 
