@@ -106,54 +106,70 @@ class ImapEmailRepository(IEmailRepository):
         if not self.connection:
             self._connect_sync()
 
-        self.connection.select("INBOX")
+        # TODO: вынести список папок в .env (IMAP_FOLDERS)
+        folders = ["INBOX", "[Gmail]/Spam"]
 
-        date_since = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
-        search_criteria = f'(UNSEEN SINCE "{date_since}")'
-        status, messages = self.connection.search(None, search_criteria)
+        result_messages: List[EmailMessage] = []
+        for folder in folders:
+            try:
+                status, _ = self.connection.select(folder)
+                if status != "OK":
+                    continue
+            except imaplib.IMAP4.error:
+                continue
 
-        if status != "OK" or not messages[0]:
-            return []
+            date_since = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
+            search_criteria = f'(UNSEEN SINCE "{date_since}")'
+            status, messages = self.connection.search(None, search_criteria)
 
-        email_ids = messages[0].split()
-        latest_email_ids = email_ids[-limit:]
+            if status != "OK" or not messages[0]:
+                continue
 
-        result_messages = []
-        for e_id in reversed(latest_email_ids):
-            res, msg_data = self.connection.fetch(e_id, "(RFC822)")
+            email_ids = messages[0].split()
+            remaining = limit - len(result_messages)
+            if remaining <= 0:
+                break
+            latest_email_ids = email_ids[-remaining:]
 
-            for response_part in msg_data:
-                if isinstance(response_part, tuple):
-                    msg = email.message_from_bytes(response_part[1])
+            for e_id in reversed(latest_email_ids):
+                res, msg_data = self.connection.fetch(e_id, "(RFC822)")
 
-                    subject = self._decode_header_part(msg.get("Subject", "(Без темы)"))
-                    sender = self._decode_header_part(msg.get("From", "Неизвестно"))
+                for response_part in msg_data:
+                    if isinstance(response_part, tuple):
+                        msg = email.message_from_bytes(response_part[1])
 
-                    date_str = msg.get("Date")
-                    try:
-                        date_obj = parsedate_to_datetime(date_str) if date_str else datetime.now()
-                        if date_obj.tzinfo is not None:
-                            date_obj = date_obj.replace(tzinfo=None)
-                    except:
-                        date_obj = datetime.now()
+                        subject = self._decode_header_part(msg.get("Subject", "(Без темы)"))
+                        sender = self._decode_header_part(msg.get("From", "Неизвестно"))
 
-                    plain_body, html_body = self._parse_body(msg)
-                    links = self._extract_links(html_body, plain_body)
-                    attachments = self._extract_attachments(msg)
-                    recipient = self._determine_recipient(msg, plain_body)
+                        date_str = msg.get("Date")
+                        try:
+                            date_obj = parsedate_to_datetime(date_str) if date_str else datetime.now()
+                            if date_obj.tzinfo is not None:
+                                date_obj = date_obj.replace(tzinfo=None)
+                        except:
+                            date_obj = datetime.now()
 
-                    email_entity = EmailMessage(
-                        uid=e_id.decode(),
-                        sender=sender,
-                        subject=subject,
-                        body=plain_body,
-                        date=date_obj,
-                        recipient_email=recipient,
-                        body_html=html_body or None,
-                        links=links,
-                        attachments=attachments,
-                    )
-                    result_messages.append(email_entity)
+                        plain_body, html_body = self._parse_body(msg)
+                        links = self._extract_links(html_body, plain_body)
+                        attachments = self._extract_attachments(msg)
+                        recipient = self._determine_recipient(msg, plain_body)
+
+                        uid_str = e_id.decode()
+                        if folder != "INBOX":
+                            uid_str = f"spam:{uid_str}"
+
+                        email_entity = EmailMessage(
+                            uid=uid_str,
+                            sender=sender,
+                            subject=subject,
+                            body=plain_body,
+                            date=date_obj,
+                            recipient_email=recipient,
+                            body_html=html_body or None,
+                            links=links,
+                            attachments=attachments,
+                        )
+                        result_messages.append(email_entity)
 
         return result_messages
 
