@@ -3,7 +3,7 @@ import html
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 
 from src.use_cases.manage_users import ManageUsersUseCase
@@ -12,6 +12,12 @@ from src.presentation.telegram.states import UserSettingsStates
 from src.infrastructure.config import APP_MODE, ADMIN_TG_ID, EMAIL_USER
 
 router = Router()
+
+_main_keyboard = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="📋 Команды")]],
+    resize_keyboard=True,
+    is_persistent=True,
+)
 
 _SENSITIVITY_LABELS = {
     "low":    "🔈 Только суперважные",
@@ -102,7 +108,37 @@ async def _send_welcome(message: Message):
         f"Доступные команды:\n{commands}"
         f"{forwarding_hint}"
     )
-    await message.answer(welcome_text, parse_mode="HTML")
+    await message.answer(welcome_text, parse_mode="HTML", reply_markup=_main_keyboard)
+
+
+@router.message(F.text == "📋 Команды")
+async def btn_commands(message: Message, user_use_case: ManageUsersUseCase):
+    if not await check_access(message):
+        return
+
+    common_commands = (
+        "👤 /profile — Мои настройки и ключевые слова\n"
+        "⚙️ /sensitivity — Настройка чувствительности\n"
+        "🔕 /dnd — Не беспокоить (вкл/выкл)\n"
+        "➕ /add — Добавить ключевое слово (триггер)\n"
+        "🚫 /stop — Добавить стоп-слово\n"
+        "➖ /remove — Удалить слово (например: /remove реклама)\n"
+        "📜 /history — Последние обработанные письма\n"
+        "📊 /stats — Статистика"
+    )
+
+    if APP_MODE == "centralized":
+        commands = f"📧 /email — Изменить привязанную почту\n🔗 /link — Привязать аккаунт с сайта\n{common_commands}"
+        forwarding_hint = (
+            "\n\n📬 <b>Адрес для пересылки писем:</b>\n"
+            f"<code>{EMAIL_USER}</code>"
+        )
+    else:
+        commands = common_commands
+        forwarding_hint = ""
+
+    text = f"📋 <b>Доступные команды:</b>\n\n{commands}{forwarding_hint}"
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.message(Command("link"))
