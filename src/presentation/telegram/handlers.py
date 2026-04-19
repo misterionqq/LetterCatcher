@@ -1,4 +1,5 @@
 import asyncio
+import html
 
 from aiogram import Router, F
 from aiogram.filters import CommandStart, Command
@@ -459,8 +460,8 @@ async def cmd_history(message: Message, user_use_case: ManageUsersUseCase):
     text = "📜 <b>Последние обработанные письма:</b>\n\n"
     for item in history:
         icon = "🔴" if item["is_important"] else "⚪️"
-        sender = item.get("sender") or "—"
-        subject = item.get("subject") or "—"
+        sender = html.escape(item.get("sender") or "—")
+        subject = html.escape(item.get("subject") or "—")
         date = item["processed_at"].strftime("%d.%m %H:%M") if item.get("processed_at") else ""
         text += f"{icon} <b>{subject}</b>\n   От: {sender} | {date}\n\n"
 
