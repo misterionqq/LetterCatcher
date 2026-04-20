@@ -22,6 +22,21 @@ class ManageUsersUseCase:
         self.email_sender = email_sender
 
     # ------------------------------------------------------------------
+    # Stale email cleanup
+    # ------------------------------------------------------------------
+
+    async def _release_stale_email(self, existing: User) -> bool:
+        """If email is unverified and older than 24h, release it. Returns True if released."""
+        if (not existing.email_verified
+                and (existing.email_set_at is None
+                     or (datetime.utcnow() - existing.email_set_at).total_seconds() > 86400)):
+            existing.email = None
+            existing.email_set_at = None
+            await self.user_repo.save_user(existing)
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # Registration / auth
     # ------------------------------------------------------------------
 
@@ -42,9 +57,11 @@ class ManageUsersUseCase:
             raise ValueError("invalid_email")
         existing = await self.user_repo.get_by_email(email)
         if existing:
-            raise ValueError("email_taken")
+            if not await self._release_stale_email(existing):
+                raise ValueError("email_taken")
         hashed = _pwd_context.hash(password)
-        user = User(email=email, password_hash=hashed, email_verified=False)
+        user = User(email=email, password_hash=hashed, email_verified=False,
+                    email_set_at=datetime.utcnow())
         user = await self.user_repo.save_user(user)
 
         await self._send_verification(user.id, email, base_url)
@@ -106,7 +123,8 @@ class ManageUsersUseCase:
             raise ValueError("invalid_email")
         existing = await self.user_repo.get_by_email(new_email)
         if existing and existing.id != user_id:
-            raise ValueError("email_taken")
+            if not await self._release_stale_email(existing):
+                raise ValueError("email_taken")
         if not self.token_repo or not self.email_sender:
             raise ValueError("email_verification_unavailable")
         token = await self.token_repo.create_token(
@@ -127,6 +145,7 @@ class ManageUsersUseCase:
             return False
         user.email = data["payload"]
         user.email_verified = True
+        user.email_set_at = datetime.utcnow()
         await self.user_repo.save_user(user)
         await self.token_repo.mark_used(token)
         return True
@@ -203,11 +222,13 @@ class ManageUsersUseCase:
             raise ValueError("invalid_email")
         existing = await self.user_repo.get_by_email(email)
         if existing and existing.id != user_id:
-            raise ValueError("email_taken")
+            if not await self._release_stale_email(existing):
+                raise ValueError("email_taken")
         user = await self.user_repo.get_by_id(user_id)
         if user:
             user.email = email
             user.email_verified = False
+            user.email_set_at = datetime.utcnow()
             await self.user_repo.save_user(user)
             await self._send_verification(user_id, email, base_url)
 

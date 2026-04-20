@@ -72,7 +72,7 @@ async def test_register_web_user_success(use_case, mock_user_repo, mock_token_re
 
 
 async def test_register_web_user_duplicate_email(use_case, mock_user_repo):
-    mock_user_repo.get_by_email.return_value = User(id=1, email="taken@mail.com")
+    mock_user_repo.get_by_email.return_value = User(id=1, email="taken@mail.com", email_verified=True)
 
     with pytest.raises(ValueError, match="email_taken"):
         await use_case.register_web_user("taken@mail.com", "password123")
@@ -221,7 +221,7 @@ async def test_request_email_change_invalid_email(use_case):
 
 
 async def test_request_email_change_email_taken(use_case, mock_user_repo):
-    mock_user_repo.get_by_email.return_value = User(id=2, email="taken@mail.com")
+    mock_user_repo.get_by_email.return_value = User(id=2, email="taken@mail.com", email_verified=True)
 
     with pytest.raises(ValueError, match="email_taken"):
         await use_case.request_email_change(1, "taken@mail.com")

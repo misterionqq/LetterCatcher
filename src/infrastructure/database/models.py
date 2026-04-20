@@ -16,6 +16,7 @@ class UserModel(Base):
     ai_sensitivity: Mapped[str] = mapped_column(String, default="medium")
     is_dnd: Mapped[bool] = mapped_column(Boolean, default=False)
     email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_set_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     keywords: Mapped[List["KeywordModel"]] = relationship(
         "KeywordModel", back_populates="user", cascade="all, delete-orphan", lazy="selectin"

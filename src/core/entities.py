@@ -38,7 +38,7 @@ class PendingNotification:
 
 @dataclass
 class User:
-    id: Optional[int] = None              
+    id: Optional[int] = None
     telegram_id: Optional[int] = None     # None for web-only users
     email: Optional[str] = None
     ai_sensitivity: str = "medium"
@@ -46,3 +46,4 @@ class User:
     keywords: List[Keyword] = field(default_factory=list)
     password_hash: Optional[str] = None   # None for telegram-only users
     email_verified: bool = False
+    email_set_at: Optional[datetime] = None
