@@ -303,6 +303,15 @@ async def register_device_token(
     await uc.user_repo.save_device_token(user_id, body.token, body.platform)
 
 
+@router.delete("/profile/device-token", status_code=status.HTTP_204_NO_CONTENT, tags=["profile"])
+async def unregister_device_token(
+    body: DeviceTokenRequest,
+    user_id: int = Depends(get_current_user_id),
+    uc: ManageUsersUseCase = Depends(get_user_use_case),
+):
+    await uc.user_repo.remove_device_tokens([body.token])
+
+
 # ============= Keywords =============
 
 @router.post("/keywords", response_model=UserOut, tags=["keywords"])
