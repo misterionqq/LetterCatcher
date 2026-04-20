@@ -1,6 +1,7 @@
 import json
 from typing import Optional, List
 from sqlalchemy import select, func, delete
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from src.core.entities import User, Keyword, PendingNotification
 from src.core.interfaces import IUserRepository
@@ -262,7 +263,10 @@ class SQLAlchemyUserRepository(IUserRepository):
             if existing.scalar_one_or_none():
                 return
             session.add(DeviceTokenModel(user_id=user_id, token=token, platform=platform))
-            await session.commit()
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
 
     async def get_device_tokens(self, user_id: int) -> List[str]:
         async with self.session_factory() as session:
