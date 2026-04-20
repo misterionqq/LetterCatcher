@@ -1,7 +1,9 @@
 import asyncio
 import imaplib
 import email
+import logging
 import re
+import time
 from datetime import datetime, timedelta
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
@@ -60,12 +62,16 @@ def _sanitize_email_html(raw_html: str) -> str:
     )
 
 
+_IMAP_MAX_CONN_AGE = 600 
+
+
 class ImapEmailRepository(IEmailRepository):
     def __init__(self, imap_server: str, email_user: str, email_password: str):
         self.imap_server = imap_server
         self.user = email_user
         self.password = email_password
         self.connection = None
+        self._connected_at: float = 0
 
     async def connect(self):
         await asyncio.to_thread(self._connect_sync)
@@ -80,7 +86,9 @@ class ImapEmailRepository(IEmailRepository):
         try:
             self.connection = imaplib.IMAP4_SSL(self.imap_server)
             self.connection.login(self.user, self.password)
+            self._connected_at = time.monotonic()
         except Exception as e:
+            self.connection = None
             raise ConnectionError(f"Ошибка подключения к IMAP: {e}")
 
     def _disconnect_sync(self):
@@ -94,11 +102,38 @@ class ImapEmailRepository(IEmailRepository):
             except:
                 pass
 
+    def _ensure_alive(self):
+        age = time.monotonic() - self._connected_at
+        if not self.connection or age > _IMAP_MAX_CONN_AGE:
+            logging.debug(f"IMAP: переподключение (возраст соединения: {age:.0f}с)")
+            self._force_disconnect()
+            self._connect_sync()
+            return
+
+        try:
+            status, _ = self.connection.noop()
+            if status != "OK":
+                raise imaplib.IMAP4.error("NOOP failed")
+        except Exception:
+            logging.debug("IMAP: NOOP failed, переподключение")
+            self._force_disconnect()
+            self._connect_sync()
+
+    def _force_disconnect(self):
+        if self.connection:
+            try:
+                self.connection.logout()
+            except Exception:
+                pass
+            self.connection = None
+
     def _get_unread_sync(self, limit: int) -> List[EmailMessage]:
+        self._ensure_alive()
         try:
             return self._fetch_unread_sync(limit)
         except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError):
-            self.connection = None
+            logging.warning("IMAP: ошибка при чтении, переподключение...")
+            self._force_disconnect()
             self._connect_sync()
             return self._fetch_unread_sync(limit)
 
@@ -115,8 +150,10 @@ class ImapEmailRepository(IEmailRepository):
                 status, _ = self.connection.select(folder)
                 if status != "OK":
                     continue
+            except imaplib.IMAP4.abort:
+                raise  # connection dead — let outer handler reconnect
             except imaplib.IMAP4.error:
-                continue
+                continue  # folder doesn't exist, skip
 
             date_since = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
             search_criteria = f'(UNSEEN SINCE "{date_since}")'

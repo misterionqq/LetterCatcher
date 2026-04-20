@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import logging
 import html
+import time
 
 from src.core.entities import PendingNotification
 from src.core.interfaces import IEmailRepository, IUserRepository, IAIAnalyzer, ICacheRepository
@@ -32,6 +33,7 @@ class MailScanner:
         self.bot = bot  # Optional: None when CLIENT_MODE=web
         self.is_running = False
         self._stop_event = asyncio.Event()
+        self._last_alive_log: float = 0
 
     async def start_polling(self, interval_seconds: int = 30):
         self.is_running = True
@@ -57,6 +59,10 @@ class MailScanner:
     async def _check_mail_iteration(self):
         emails = await self.email_repo.get_unread_emails(limit=5)
         if not emails:
+            now = time.monotonic()
+            if now - self._last_alive_log > 600:
+                logging.info("Сканер активен, новых писем нет.")
+                self._last_alive_log = now
             return
 
         logging.info(f"Найдено {len(emails)} новых писем. Начинаем анализ...")
