@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 from src.use_cases.manage_users import ManageUsersUseCase
 from src.use_cases.mail_scanner import _format_notification
 from src.presentation.telegram.states import UserSettingsStates
-from src.infrastructure.config import APP_MODE, ADMIN_TG_ID, EMAIL_USER
+from src.infrastructure.config import APP_MODE, ADMIN_TG_ID, EMAIL_USER, APP_BASE_URL
 
 router = Router()
 
@@ -221,7 +221,7 @@ async def process_email_registration(message: Message, state: FSMContext, user_u
 
     email_input = message.text.strip().lower()
     try:
-        await user_use_case.set_email(user_id=user.id, email=email_input)
+        await user_use_case.set_email(user_id=user.id, email=email_input, base_url=APP_BASE_URL)
     except ValueError as e:
         if str(e) == "email_taken":
             await message.answer(
@@ -342,7 +342,7 @@ async def cmd_email(message: Message, user_use_case: ManageUsersUseCase):
 
     email = parts[1].strip().lower()
     try:
-        await user_use_case.set_email(user_id=user.id, email=email)
+        await user_use_case.set_email(user_id=user.id, email=email, base_url=APP_BASE_URL)
     except ValueError as e:
         if str(e) == "email_taken":
             await message.answer(

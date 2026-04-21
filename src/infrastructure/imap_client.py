@@ -4,7 +4,7 @@ import email
 import logging
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -180,11 +180,11 @@ class ImapEmailRepository(IEmailRepository):
 
                         date_str = msg.get("Date")
                         try:
-                            date_obj = parsedate_to_datetime(date_str) if date_str else datetime.now()
+                            date_obj = parsedate_to_datetime(date_str) if date_str else datetime.utcnow()
                             if date_obj.tzinfo is not None:
-                                date_obj = date_obj.replace(tzinfo=None)
-                        except:
-                            date_obj = datetime.now()
+                                date_obj = date_obj.astimezone(timezone.utc).replace(tzinfo=None)
+                        except Exception:
+                            date_obj = datetime.utcnow()
 
                         plain_body, html_body = self._parse_body(msg)
                         links = self._extract_links(html_body, plain_body)
