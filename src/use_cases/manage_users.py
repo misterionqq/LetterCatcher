@@ -301,7 +301,11 @@ class ManageUsersUseCase:
 
         orphan = await self.user_repo.get_by_telegram_id(telegram_id)
         if orphan and orphan.id != user.id:
-            await self.user_repo.delete_user(orphan.id)
+            if orphan.password_hash:
+                orphan.telegram_id = None
+                await self.user_repo.save_user(orphan)
+            else:
+                await self.user_repo.delete_user(orphan.id)
 
         user.telegram_id = telegram_id
         await self.user_repo.save_user(user)
@@ -335,7 +339,11 @@ class ManageUsersUseCase:
 
         orphan = await self.user_repo.get_by_telegram_id(telegram_id)
         if orphan and orphan.id != user.id:
-            await self.user_repo.delete_user(orphan.id)
+            if orphan.password_hash:
+                orphan.telegram_id = None
+                await self.user_repo.save_user(orphan)
+            else:
+                await self.user_repo.delete_user(orphan.id)
 
         user.telegram_id = telegram_id
         await self.user_repo.save_user(user)
