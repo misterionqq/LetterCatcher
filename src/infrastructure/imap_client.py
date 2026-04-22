@@ -157,7 +157,7 @@ class ImapEmailRepository(IEmailRepository):
 
             date_since = (datetime.now() - timedelta(days=2)).strftime("%d-%b-%Y")
             search_criteria = f'(UNSEEN SINCE "{date_since}")'
-            status, messages = self.connection.search(None, search_criteria)
+            status, messages = self.connection.uid("search", None, search_criteria)
 
             if status != "OK" or not messages[0]:
                 continue
@@ -169,7 +169,7 @@ class ImapEmailRepository(IEmailRepository):
             latest_email_ids = email_ids[-remaining:]
 
             for e_id in reversed(latest_email_ids):
-                res, msg_data = self.connection.fetch(e_id, "(RFC822)")
+                res, msg_data = self.connection.uid("fetch", e_id, "(RFC822)")
 
                 for response_part in msg_data:
                     if isinstance(response_part, tuple):
